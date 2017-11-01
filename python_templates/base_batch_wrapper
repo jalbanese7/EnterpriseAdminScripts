@@ -1,0 +1,14 @@
+#!/bin/bash
+
+cmdArgs=""
+if [ "$#" -gt 0 ]
+   then
+      cmdArgs=$1
+fi
+
+source /root/anaconda3/bin/activate ### INSERT: ANACONDA_ENV
+python /shared_volume/python_codebase/### INSERT: PROGRAM_NAME.py ### INSERT: SERVERNAME ### INSERT: CONTAINERNAME --cmdargs=$cmdArgs
+source /root/anaconda3/bin/deactivate
+
+exit
+

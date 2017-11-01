@@ -1,0 +1,549 @@
+#/bin/bash
+
+###########################################################################################
+# Comments:
+#  Driving data structure example:  listener^dev^lTestlistener^5
+#     "listener = Enterprise Instance Type
+#     "dev" = Runtime Environment - Options dev, uat, test, and prod
+#     "l-testlistener" = App name. Note that the associated Python program.py, config.ini, 
+#                    testharness.py, and anacondaenv.yml files need to be checked into their
+#                    associated BitBucket repositories before activation can occur. All file
+#                    names should be the same, but the file extensions will differ based on
+#                    then repository the file resides in.
+#     "5" = Number of desired occurrences
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016 
+###########################################################################################
+
+userSpecifiedEnv=$1
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+if [ $userSpecifiedEnv == "dev" ]
+  then
+      msg="DEV App Listeners Started..."
+      dns_prefix="d-"
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_nonprod_volume/$userSpecifiedEnv" 
+elif [ $userSpecifiedEnv == "test" ]
+  then
+      msg="TEST App Listeners Started..."
+      dns_prefix="t-"
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_nonprod_volume/$userSpecifiedEnv" 
+elif [ $userSpecifiedEnv == "uat" ]
+  then
+      msg="UAT App Listeners Started..."
+      dns_prefix="u-"
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_nonprod_volume/$userSpecifiedEnv" 
+elif [ $userSpecifiedEnv == "prod" ]
+  then
+      msg="PROD App Listeners Started..."
+      dns_prefix=""
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_prod_volume/$userSpecifiedEnv" 
+else
+    echo
+    echo "Usage: ent_start_listeners <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+
+# Verify veracript volume is mounted and creds are readable
+cnt=`ls $privateClientArea/creds.json|wc -c`
+if [ $cnt -eq 0 ]
+  then
+     clear
+     echo;echo
+     tput smso
+     echo "Error - Action Required"
+     tput rmso
+     echo;echo
+     echo "The security team needs to mount the encrypted VeraCrypt volume using their secret password."
+     echo;echo
+     exit
+fi
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+# Verify that Enterprise master indicator file is present
+if [ ! -f /root/enterprise_master_server ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_master_server - See server Administrator"
+    echo
+    exit
+fi
+read masterServer < /root/enterprise_master_server
+
+clear
+echo "==========================================================================" 
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase" 
+echo;
+tput smso;
+tput blink;
+echo "                 Starting 'App Listeners' - Please wait...                "
+tput sgr0;
+echo "==========================================================================" 
+echo;echo;echo
+
+dataDir="/enterprise_system/administration/data"
+driverFile="/enterprise_system/administration/data/ent_app_driver.conf"
+appScriptBaseDir="/enterprise_system/administration/app_scripts/base_script"
+appScriptDir="/enterprise_system/administration/app_scripts"
+appModelBaseDir="/enterprise_system/administration/app_models/base_model"
+appModelDir="/enterprise_system/administration/app_models"
+pythonTemplateDir="/enterprise_system/administration/python_templates"
+pythonWrapperDestDir="/enterprise_system/$userSpecifiedEnv/services/guardian/script_wrappers"
+nginxDir="/enterprise_system/administration/nginx_gateway_config/$userSpecifiedEnv"
+nginxLogs="/enterprise_system/administration/nginx_gateway_logs/$userSpecifiedEnv"
+nginxModelTemplates="/enterprise_system/administration/nginx_gateway_config/templates"
+botoScriptDir="/enterprise_system/administration/aws_boto"
+botoDataDir="/enterprise_system/administration/aws_admin_data"
+guardianBotoLbDir="/enterprise_system/administration/data/guardian_lb"
+
+read clientEmail < /enterprise_system/admin/data/guardian_email
+read loadBalancerZoneId < $guardianBotoLbDir/$userSpecifiedEnv"_hostedzoneid"
+read loadBalancerDns < $guardianBotoLbDir/$userSpecifiedEnv"_dns"
+read activeContainerVer < $dataDir/active_container_ver
+read activeDomain < $dataDir/active_domain
+
+fullCondaVer="ent_"$activeContainerVer"_anaconda"
+
+splunkLogDir="/root/enterprise_admin_splunk"
+adminLogFile=$splunkLogDir"/ent_admin_audit.log"
+
+# Spawn App Listeners
+rm /tmp/nginx* > /dev/null 2>&1
+rm $nginxDir/gateway.conf > /dev/null 2>&1
+rm /enterprise_system/admin/monitor_urls/$serverId/* > /dev/null 2>&1
+
+FLOOR=8000
+RANGE=9999
+
+# Clear existing running app listeners and inactive dormant app listeners within the user specified region 
+rm /tmp/dockerInstances* > /dev/null 2>&1
+docker images > /tmp/dockerOldInstances1
+awk -v env="$1" 'BEGIN {FS=" " }
+{
+  if ($0 ~ "REPOSITORY") {
+      next;
+   }
+   if ($0 ~ "_gateway_") {
+      next;
+   }
+   if ($0 ~ "_batch_") {
+      next;
+   }
+   if ($0 !~ "ent_app_") {
+      next;
+   }
+   split($0, rowEnvBuf, " ");
+   split(rowEnvBuf[1], rowEnv, "_")
+   if (rowEnv[6] !~ env) {
+      next;
+   }
+   print $1;
+}
+' /tmp/dockerOldInstances1 > /tmp/dockerOldInstances2
+
+for ID in `cat /tmp/dockerOldInstances2`
+do
+   docker stop $ID
+   docker rm -v $ID
+   docker rmi -f $ID
+done
+
+rm /tmp/ent_dup_check > /dev/null 2>&1
+touch /tmp/ent_dup_check
+rm /tmp/dev_active_appnames > /dev/null 2>&1
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type listener 
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowEnv != $userSpecifiedEnv ] 
+      then
+        continue 
+    fi
+    if [ $rowType != "listener" ] 
+      then
+        continue 
+    fi
+    cnt=`expr $cnt + 1`
+
+    rowOcc=`echo $R|cut -d'^' -f4`
+    for rowOccCnt in `seq 1 $rowOcc`;
+    do
+
+    # Dynamic port assignment 
+    dupcnt=0
+    while [ "$dupcnt" -eq 0 ]
+    do
+       number=0   #initialize
+       while [ "$number" -le $FLOOR ]
+       do
+         number=$RANDOM
+         let "number %= $RANGE"  # Scales $number down within $RANGE.
+       done
+       if [ `cat /tmp/ent_dup_check|grep -c $number` -eq 0 ]
+         then
+           internalPortNumber=$number
+           echo $number >> /tmp/ent_dup_check
+           dupcnt=1
+       fi
+    done
+
+    # App Model
+    rowAppIdName=`echo $R|cut -d'^' -f3`
+    if [ $userSpecifiedEnv == "dev" ]
+       then
+           echo $rowAppIdName >> /tmp/dev_active_appnames
+    fi
+    anacondaEnvFile=$rowAppIdName".yml"
+    pythonConfigFile=$rowAppIdName".ini"
+    buf1="ent_app_"$rowAppIdName
+    rowAppId=$buf1
+    rm -rf $appModelDir/$rowAppId > /dev/null 2>&1
+    mkdir $appModelDir/$rowAppId
+    cp -r $appModelBaseDir/ent_app_listener/* $appModelDir/$rowAppId
+    cp $privateClientArea/creds.json $appModelDir/$rowAppId
+    cp /mnt/nfs/awsefs/AnacondaEnvironments/$anacondaEnvFile $appModelDir/$rowAppId/active_anaconda_env.yml
+    cp /mnt/nfs/awsefs/PythonConfig$envUpperCase/$pythonConfigFile $appModelDir/$rowAppId
+    sed -i "s/### INSERT: PORT/EXPOSE $internalPortNumber/g" $appModelDir/$rowAppId/Dockerfile
+    sed -i "s/### INSERT: SCRIPTWRAPPER/$rowAppId/g" $appModelDir/$rowAppId/Dockerfile
+    sed -i "s/### INSERT: ENTANACONDA/$fullCondaVer/g" $appModelDir/$rowAppId/Dockerfile
+    cd $appModelDir/$rowAppId
+    appName=${rowAppId,,}"_listener_"$internalPortNumber"_"$userSpecifiedEnv 
+    docker stop $appName
+    docker rm -v $appName
+    docker rmi $appName
+    docker build -t $appName . 
+    rm $appModelDir/$rowAppId/creds.json
+    rm $appModelDir/$rowAppId/active_anaconda_env.yml
+    rm $appModelDir/$rowAppId/$pythonConfigFile
+
+    # Python Script Wrapper
+    #buf1=`ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{print $1}' | tr [.] [_]`
+    containerName="--containername="$appName"_"$serverId
+    serverName="--servername="$serverId
+    logId="lislog_"$serverId"_"$rowAppIdName"_"$internalPortNumber
+    upperCaseEnv=${rowEnv^^}
+    anacondaEnv=$rowAppIdName
+    rm $pythonTemplateDir/$rowAppId > /dev/null 2>&1
+    cp $pythonTemplateDir/base_listener_wrapper $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: ANACONDA_ENV/$anacondaEnv/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: PROGRAM_NAME/$rowAppIdName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: PORT/--port=$internalPortNumber/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: LOGID/$logId/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: SERVERNAME/$serverName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: CONTAINERNAME/$containerName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: MODE/--mode=$upperCaseEnv/g" $pythonTemplateDir/$rowAppId
+    cp $pythonTemplateDir/$rowAppId $pythonWrapperDestDir/$rowAppId
+
+    # App Script
+    cp $appScriptBaseDir/ent_app_listener $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: ENV/ENV=\"$userSpecifiedEnv\"/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_NAME/$appName/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_INTERNAL_PORT:APP_EXTERNAL_PORT/$internalPortNumber:$internalPortNumber/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_MODEL_NAME/$appName/g" $appScriptDir/$rowAppId
+    $appScriptDir/$rowAppId
+
+    # NGINX
+    serverIp=`ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{print $1}'`
+    entryValue="server "$serverIp":"$internalPortNumber
+    echo -n $entryValue"; " > /tmp/nginx_$appName
+
+    done
+
+done
+
+# terminate if no records to process
+if [ $cnt -eq 0 ]
+  then
+     echo
+     echo -n "No config entries for environment ";tput smso;echo -n $envUpperCase;tput rmso;echo " are available for processing."
+     echo
+     exit
+fi
+
+if [ $userSpecifiedEnv == "dev" ]
+   then
+       # Finalize app name xref for DEV CI
+       awk ' {}
+       {
+           printf "%s^%s\n", tolower($0),$0
+       }
+       ' /tmp/dev_active_appnames > /tmp/dev_active_appnames_xref
+fi
+
+# Build NGINX conf.d file redirect
+cd /tmp
+processHistory=""
+for F in `ls nginx_*`
+do
+    tagName=${F:6}
+    appName=`echo $tagName|cut -d'_' -f3`
+    if [ `echo $processHistory|grep -c $appName` -gt 0 ]
+        then
+             continue
+    else 
+          processHistory=$processHistory" "$appName
+    fi
+    cp $nginxModelTemplates/gateway.conf.model.entry1 /tmp/nginxentry1_$tagName
+    sed -i "s/### INSERT: DOMAINNAME/$activeDomain/g" /tmp/nginxentry1_$tagName 
+    sed -i "s/### INSERT: PORT/*:443;/g" /tmp/nginxentry1_$tagName 
+    buf1=`echo $tagName|cut -d'_' -f3`
+    dns=$buf1"."$activeDomain".com;"
+    sed -i "s/### INSERT DNS/$dns_prefix$dns/g" /tmp/nginxentry1_$tagName 
+    proxy=$buf1"_"$activeDomain"_com"
+    sed -i "s/### INSERT: PROXY/http:\/\/$proxy;/g" /tmp/nginxentry1_$tagName 
+    buf2=$buf1"_"$serverId"_access.log"
+    if [ ! -f $nginxLogs/$buf2 ]
+      then
+         touch $nginxLogs/$buf2
+         chmod 755 $nginxLogs/$buf2
+    fi
+    sed -i "s/### INSERT: ACCESSLOG/$buf2/g" /tmp/nginxentry1_$tagName 
+    buf2=$buf1"_"$serverId"_error.log"
+    sed -i "s/### INSERT: ERRORLOG/$buf2/g" /tmp/nginxentry1_$tagName 
+    if [ ! -f $nginxLogs/$buf2 ]
+      then
+         touch $nginxLogs/$buf2
+         chmod 755 $nginxLogs/$buf2
+    fi
+
+    # Update ROUTE53 entries 
+    if [ $masterServer == "true" ]
+      then
+         if [ $userSpecifiedEnv == "prod" ]
+           then
+            buf1=`echo $tagName|cut -d'_' -f3`
+            lbDns=$buf1"."$activeDomain".com"
+            cp $botoDataDir/base_models/DeleteDNS.JSON $botoDataDir/DeleteDNS.JSON
+            comment="DNS Removal from from Start Listeners Script"
+            sed -i "s/### INSERT: COMMENT/$comment/g" $botoDataDir/DeleteDNS.JSON
+            sed -i "s/### INSERT: DNS/$dns_prefix$lbDns/g" $botoDataDir/DeleteDNS.JSON
+            sed -i "s/### INSERT: LBDNS/$loadBalancerDns/g" $botoDataDir/DeleteDNS.JSON
+            sed -i "s/### INSERT: LBZONEID/$loadBalancerZoneId/g" $botoDataDir/DeleteDNS.JSON
+            $botoScriptDir/ent_manage_aws default delRoute53DNS
+
+            cp $botoDataDir/base_models/AddDNS.JSON $botoDataDir/AddDNS.JSON
+            comment="DNS Insertion from from Start Listeners Script"
+            sed -i "s/### INSERT: COMMENT/$comment/g" $botoDataDir/AddDNS.JSON
+            sed -i "s/### INSERT: DNS/$dns_prefix$lbDns/g" $botoDataDir/AddDNS.JSON
+            sed -i "s/### INSERT: LBDNS/$loadBalancerDns/g" $botoDataDir/AddDNS.JSON
+            sed -i "s/### INSERT: LBZONEID/$loadBalancerZoneId/g" $botoDataDir/AddDNS.JSON
+            $botoScriptDir/ent_manage_aws default addRoute53DNS
+         else
+            buf1=`echo $tagName|cut -d'_' -f3`
+            lbDns=$buf1"."$activeDomain".com"
+            if [ `$botoScriptDir/ent_manage_aws default listRoute53DNS|grep -c $dns_prefix$lbDns` -eq 0 ]
+               then
+                   cp $botoDataDir/base_models/AddDNS.JSON $botoDataDir/AddDNS.JSON 
+                   comment="DNS Insertion from from Start Listeners Script"
+                   sed -i "s/### INSERT: COMMENT/$comment/g" $botoDataDir/AddDNS.JSON 
+                   sed -i "s/### INSERT: DNS/$dns_prefix$lbDns/g" $botoDataDir/AddDNS.JSON 
+                   sed -i "s/### INSERT: LBDNS/$loadBalancerDns/g" $botoDataDir/AddDNS.JSON 
+                   sed -i "s/### INSERT: LBZONEID/$loadBalancerZoneId/g" $botoDataDir/AddDNS.JSON 
+                   $botoScriptDir/ent_manage_aws default addRoute53DNS
+            fi
+         fi
+    fi
+done
+
+# Build NGINX conf.d file upstream 
+processHistory=""
+for F in `ls nginx_*`
+do
+    tagName=${F:6}
+    appName=`echo $tagName|cut -d'_' -f3`
+    if [ `echo $processHistory|grep -c $appName` -gt 0 ]
+        then
+             continue
+    else 
+          processHistory=$processHistory" "$appName
+    fi
+    cp $nginxModelTemplates/gateway.conf.model.entry2 /tmp/nginxentry2_$tagName
+    buf1=`echo $tagName|cut -d'_' -f3`
+    proxy=$buf1"_"$activeDomain"_com"
+    sed -i "s/### INSERT: UPSTREAM_DNS/$proxy/g" /tmp/nginxentry2_$tagName        
+    sed -i "s/### INSERT: UPSTREAM_SERVICE_DETAILS/### INSERT: UPSTREAM_SERVICE_DETAILS_$proxy/g" /tmp/nginxentry2_$tagName        
+done
+
+# Stage Env specific conf.d models
+rm $nginxDir/* > /dev/null 2>&1
+for F in `ls nginxentry1*`
+do
+    cat /tmp/$F >> $nginxDir/gateway.conf.model
+done
+for F in `ls nginxentry2*`
+do
+    cat /tmp/$F >> $nginxDir/gateway.conf.model
+done
+
+# Insert specific detail service entries
+cp $nginxDir/gateway.conf.model $nginxDir/gateway.conf
+rm /tmp/nginxdetail* > /dev/null 2>&1
+for F in `ls nginx_*`
+do
+ appName=`echo $F|cut -d'_' -f4`
+ appType=`echo $F|cut -d'_' -f5`
+ appEnv=`echo $F|cut -d'_' -f7`
+ filename="nginxdetail_"$appName"_"$appType"_"$appEnv
+ cat $F >> /tmp/$filename
+done
+
+for F in `ls nginxdetail_*`
+do
+    tagName=${F:12}
+    buf1=`echo $tagName|cut -d'_' -f1`
+    proxy=$buf1"_"$activeDomain"_com"
+    newEntry=`cat /tmp/$F`
+    sed -i "s/### INSERT: UPSTREAM_SERVICE_DETAILS_$proxy/$newEntry/g" $nginxDir/gateway.conf
+    pollUrlData="http://"$serverId"."$activeDomain".com:"`echo $newEntry|cut -d' ' -f2|cut -d';' -f1|cut -d':' -f2`
+    echo $pollUrlData >> /enterprise_system/admin/monitor_urls/$serverId/curl_data
+done
+
+# Create iguana recycle restore version of conf file. Iguana has prod gateway dependencies.
+if [ $userSpecifiedEnv == "prod" ]
+  then
+    desFile="$nginxDir/gateway.conf.restore"
+    cp $nginxDir/gateway.conf $desFile
+fi
+
+rm /tmp/nginx_staticwebsite_entries > /dev/null 2>&1
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type website
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowEnv != $userSpecifiedEnv ]
+      then
+        continue
+    fi
+    if [ $rowType != "website" ]
+      then
+        continue
+    fi
+
+    rowSiteName=`echo $R|cut -d'^' -f3`
+    rowHttpType=`echo $R|cut -d'^' -f4`
+    cp $nginxModelTemplates/gateway.conf.model.entry5 /tmp/nginx_staticwebsite_entry_$rowSiteName
+    dns=$rowSiteName"."$activeDomain".com"
+    sed -i "s/### INSERT: DOMAINNAME/$activeDomain/g" /tmp/nginx_staticwebsite_entry_$rowSiteName 
+    sed -i "s/### INSERT: DNS/$dns_prefix$dns;/g" /tmp/nginx_staticwebsite_entry_$rowSiteName
+    sed -i "s/### INSERT: WEBSITENAME/$rowSiteName/g" /tmp/nginx_staticwebsite_entry_$rowSiteName
+    buf2=$rowSiteName"_"$serverId"_access.log"
+    sed -i "s/### INSERT: ACCESSLOG/$buf2/g" /tmp/nginx_staticwebsite_entry_$rowSiteName 
+    buf2=$rowSiteName"_"$serverId"_error.log"
+    sed -i "s/### INSERT: ERRORLOG/$buf2/g" /tmp/nginx_staticwebsite_entry_$rowSiteName 
+    cat /tmp/nginx_staticwebsite_entry_$rowSiteName >> /tmp/nginx_staticwebsite_entries
+
+    if [ $rowHttpType == "https_http" ]
+      then
+         cp $nginxModelTemplates/gateway.conf.model.entry6 /tmp/nginx_staticwebsite_entry_$rowSiteName
+         dns=$rowSiteName"."$activeDomain".com"
+         sed -i "s/### INSERT: DOMAINNAME/$activeDomain/g" /tmp/nginx_staticwebsite_entry_$rowSiteName
+         sed -i "s/### INSERT: DNS/$dns_prefix$dns;/g" /tmp/nginx_staticwebsite_entry_$rowSiteName
+         sed -i "s/### INSERT: WEBSITENAME/$rowSiteName/g" /tmp/nginx_staticwebsite_entry_$rowSiteName
+         buf2=$rowSiteName"_"$serverId"_access.log"
+         sed -i "s/### INSERT: ACCESSLOG/$buf2/g" /tmp/nginx_staticwebsite_entry_$rowSiteName 
+         if [ ! -f $nginxLogs/$buf2 ]
+           then
+              touch $nginxLogs/$buf2
+              chmod 755 $nginxLogs/$buf2
+         fi
+         buf2=$rowSiteName"_"$serverId"_error.log"
+         sed -i "s/### INSERT: ERRORLOG/$buf2/g" /tmp/nginx_staticwebsite_entry_$rowSiteName 
+         if [ ! -f $nginxLogs/$buf2 ]
+           then
+              touch $nginxLogs/$buf2
+              chmod 755 $nginxLogs/$buf2
+         fi
+         cat /tmp/nginx_staticwebsite_entry_$rowSiteName >> /tmp/nginx_staticwebsite_entries
+    fi
+
+    # Update ROUTE53 entries 
+    if [ $masterServer == "true" ]
+      then
+          lbDns=$rowSiteName"."$activeDomain".com" 
+          if [ `$botoScriptDir/ent_manage_aws default listRoute53DNS|grep -c $dns_prefix$lbDns` -eq 0 ]
+            then
+                cp $botoDataDir/base_models/AddDNS.JSON $botoDataDir/AddDNS.JSON
+                comment="DNS Insertion from from Start Listeners Script"
+                sed -i "s/### INSERT: COMMENT/$comment/g" $botoDataDir/AddDNS.JSON
+                sed -i "s/### INSERT: DNS/$dns_prefix$lbDns/g" $botoDataDir/AddDNS.JSON
+                sed -i "s/### INSERT: LBDNS/$loadBalancerDns/g" $botoDataDir/AddDNS.JSON
+                sed -i "s/### INSERT: LBZONEID/$loadBalancerZoneId/g" $botoDataDir/AddDNS.JSON
+                $botoScriptDir/ent_manage_aws default addRoute53DNS
+         fi
+    fi
+ 
+done
+
+# Append to region NGINX Gateway config 
+cat /tmp/nginx_staticwebsite_entries >> $nginxDir/gateway.conf
+
+if [ $userSpecifiedEnv == "prod" ]
+  then
+     # Append Console listener entries
+     tmpConsoleFile="/tmp/console_nginx_"$userSpecifiedEnv"_"$serverId"_entry_console"
+     cp $nginxModelTemplates/gateway.conf.model.console $tmpConsoleFile 
+     sed -i "s/### INSERT: DOMAINNAME/$activeDomain/g" $tmpConsoleFile
+     sed -i "s/### INSERT: UPSTREAM_SERVICE_IP/$serverIp/g" $tmpConsoleFile 
+     cat $tmpConsoleFile >> $nginxDir/gateway.conf
+fi
+
+echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=Listener Management ent_action=Start Python Listeners ent_message_type=info ent_message=The Listeners have been restarted in environment $envUpperCase " >> $adminLogFile
+
+# GoDaddy and Internal Required Entry Information
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo "--------------------------------------------------------------------------"
+tput smso;
+echo "                 GoDaddy and Internal DNS Required Entries                "
+tput rmso;
+echo "--------------------------------------------------------------------------"
+
+cd /tmp
+processHistory=""
+for F in `ls nginx_*`
+do
+    if [ `echo $F|grep -c "_entries"` -gt 0 ]
+      then
+          continue
+    fi
+    tagName=${F:6}
+    appName=`echo $tagName|cut -d'_' -f3`
+    if [ `echo $processHistory|grep -c $appName` -gt 0 ]
+        then
+             continue
+    else
+          processHistory=$processHistory" "$appName
+    fi
+    dns=`echo $F|cut -d'_' -f4`"."$activeDomain".com"
+    if [ `echo $dns|grep -c console` -lt 1 ]
+      then
+          echo "                     $dns_prefix$dns"
+          pollUrlData="https://"$dns_prefix$dns
+          echo $pollUrlData >> /enterprise_system/admin/monitor_urls/$serverId/curl_data 
+    fi
+done
+
+echo;echo;echo
+
+exit
+
+
+

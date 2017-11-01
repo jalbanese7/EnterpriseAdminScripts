@@ -1,0 +1,27 @@
+#!/bin/bash
+
+### INSERT: ENV
+
+cmdArgs=""
+if [ "$#" -gt 0 ]
+   then
+      cmdArgs=$1
+fi
+
+enterprise_system=`cat /enterprise_system/administration/data/ent_env|cut -d'^' -f1`
+docker stop ### INSERT: APP_NAME 
+docker rm -v ### INSERT: APP_NAME
+
+map1LocationAndAlias="$enterprise_system/$ENV/services/guardian/script_wrappers:/shared_volume/scripts"
+map2LocationAndAlias="$enterprise_system/$ENV/services/guardian/python_codebase:/shared_volume/python_codebase"
+map3LocationAndAlias="$enterprise_system/$ENV/shared_areas:/shared_areas"
+map4LocationAndAlias="$enterprise_system/$ENV/shared_areas/config:/shared_areas/config"
+map5LocationAndAlias="$enterprise_system/$ENV/shared_areas/app_resources:/shared_areas/app_resources"
+map6LocationAndAlias="/mnt/nfs/softnas/DataArchive:/shared_data_archive"
+
+
+docker run --name ### INSERT: APP_NAME -v $map1LocationAndAlias -v $map2LocationAndAlias -v $map3LocationAndAlias -v $map4LocationAndAlias -v $map5LocationAndAlias -v $map6LocationAndAlias -d ### INSERT: APP_MODEL_NAME $cmdArgs
+
+exit
+
+

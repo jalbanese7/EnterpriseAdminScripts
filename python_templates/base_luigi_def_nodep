@@ -1,0 +1,17 @@
+    
+class ### INSERT: TASKNAME(luigi.Task):
+    """
+    Dynamically bind luigi template for batch task automation purposes
+    """
+
+    def output(self):
+        return luigi.LocalTarget('/enterprise_system/### INSERT: ENV/shared_areas/luigi_status_files/### INSERT: SCENARIONAME/### INSERT: FULLTASKNAME_chain.txt')
+
+    def run(self):
+        with self.output().open('w') as fout:
+            p = subprocess.Popen(['/enterprise_system/### INSERT: ENV/services/guardian/batch_docker_scripts/### INSERT: SHELLTASKNAMEWITHARG'], shell=True)
+            p.wait()
+            fout.write("Task Complete")
+
+
+

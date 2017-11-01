@@ -1,0 +1,58 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016
+###########################################################################################
+
+if [ $# -ne 2 ]
+  then
+    echo
+    echo "Usage: ent_delete_app <<Case Sensitive App Name>> <<Requester Id>>"
+    echo
+    exit
+fi
+
+dataDir="/enterprise_system/administration/data"
+dataFile="$dataDir/ent_app_driver.conf"
+appName=$1
+appReq=$2
+searchAppName="\^"$appName"\^"
+
+read clientEmail < $dataDir/guardian_email
+read activeDomain < $dataDir/active_domain
+
+if [ `cat $dataFile|grep -c $searchAppName` -eq 0 ]
+  then
+      wget "https://console."$activeDir".com/sendemail?to=$clientEmail&subject=Enterprise Administrative Alert&msg=An attempt was made by developer "$appReq" to delete an app named "$appName". It was denied becuase the app does not exist. See Splunk for details."
+      rm ./sendemail* > /dev/null 2>&1
+      exit
+fi
+
+rm /tmp/tmp_ent_app_driver.conf > /dev/null 2>&1
+for R in `cat $dataFile`
+do
+    rowEnv=`echo $R|cut -d'^' -f2`
+    rowAppName=`echo $R|cut -d'^' -f3`
+    if [ $rowEnv == "dev" ] 
+       then
+          if [ $rowAppName == $appName ]
+             then
+                continue
+          fi
+    fi
+    
+    echo $R >> /tmp/tmp_ent_app_driver.conf 
+
+done
+
+cp /tmp/tmp_ent_app_driver.conf $dataFile
+wget "https://console."$activeDir".com/sendemail?to=$clientEmail&subject=Enterprise Administrative Alert&msg=Developer "$appReq" deleted an app named "$appName". Recycle app listener services to activate modifications. See Splunk for details."
+rm ./sendemail* > /dev/null 2>&1
+
+exit
+
+

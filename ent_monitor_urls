@@ -1,0 +1,34 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#         Monitor Active Listener and Website URL on local sevver 
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 9/22/2016
+###########################################################################################
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+curlInputDir="/enterprise_system/admin/monitor_urls"
+splunkLogDir="/root/enterprise_admin_splunk"
+monitorLogFile=$splunkLogDir"/ent_url_monitor.log"
+
+for URL in `cat $curlInputDir/$serverId/curl_data`
+do
+     retval=`curl -sL -w "%{http_code} %{url_effective}\\n" $URL -o /dev/null`
+     echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=URL Management ent_action=Fetch Active URL Status ent_message_type=info ent_message=$retval " >> $monitorLogFile
+
+done
+
+exit
+

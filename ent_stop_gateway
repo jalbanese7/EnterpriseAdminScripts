@@ -1,0 +1,104 @@
+#!/bin/bash
+
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 6/2/2016
+###########################################################################################
+
+if [ $# -eq 0 ]
+  then
+    echo
+    echo "Usage: ent_stop_gateway <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+
+userSpecifiedEnv=$1
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+if [ $userSpecifiedEnv == "dev" ]
+  then
+     msg="DEV Enterprise Gateway Stopped..."
+elif [ $userSpecifiedEnv == "test" ]
+  then
+     msg="TEST Enterprise Gateway Stopped..."
+elif [ $userSpecifiedEnv == "uat" ]
+  then
+     msg="UAT Enterprise Gateway Stopped..."
+elif [ $userSpecifiedEnv == "prod" ]
+  then
+     msg="PROD Enterprise Gateway Stopped..."
+else 
+    echo
+    echo "Usage: ent_stop_gateway <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo;
+tput smso;
+tput blink;
+echo "                 Stopping 'App Gateway' - Please wait...                  "
+tput sgr0;
+echo "=========================================================================="
+echo;echo;echo
+
+read clientEmail < /enterprise_system/admin/data/guardian_email
+
+splunkLogDir="/root/enterprise_admin_splunk"
+adminLogFile=$splunkLogDir"/ent_admin_audit.log"
+
+
+# Clear existing running app listeners and inactive dormant app listeners within the user specified region 
+rm /tmp/dockerInstances* > /dev/null 2>&1
+docker ps -a > /tmp/dockerOldInstances1
+awk -v env="$userSpecifiedEnv" 'BEGIN {FS=" " }
+{
+  if ($0 ~ "CONTAINER") {
+      next;
+   }
+   if ($0 !~ env) {
+      next;
+   }
+   if ($0 ~ "_gateway_") {
+      print $1;
+   }
+}
+' /tmp/dockerOldInstances1 > /tmp/dockerOldInstances2
+
+for ID in `cat /tmp/dockerOldInstances2`
+do
+   docker stop $ID
+   docker rm -v $ID
+done
+
+echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=Gateway Management ent_action=Stop Gateway Proxy ent_message_type=info ent_message=The Gateway has been stopped in environment $envUpperCase " >> $adminLogFile
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo "=========================================================================="
+echo;echo;echo
+
+echo
+echo $msg
+echo
+echo;echo;echo
+
+exit

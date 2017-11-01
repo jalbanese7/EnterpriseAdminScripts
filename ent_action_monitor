@@ -1,0 +1,128 @@
+#/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 11/8/2016
+###########################################################################################
+
+dataDir="/enterprise_system/administration/data"
+scriptDir="/enterprise_system/administration/admin_scripts"
+read consoleActionInd < /enterprise_system/admin/data/console_action_indicator
+read actionStatus < $dataDir/dev_action_status
+
+# Input arg format action_appname_requesterid
+action=`echo $consoleActionInd|cut -d'_' -f1`
+appName=`echo $consoleActionInd|cut -d'_' -f2`
+splunkLogDir="/enterprise_system/dev/shared_areas/splunk"
+#splunkLogDir="/enterprise_system/uat/shared_areas/splunk"
+actionLogFile=$splunkLogDir"/ent_consoleaction_audit.log"
+requesterId=`echo $consoleActionInd|cut -d'_' -f3`
+
+# PROD Instance special handling
+if [ $action == 'changeProdInstances' ]
+   then
+      appInstances=`echo $consoleActionInd|cut -d'_' -f4`
+fi
+
+if [ `cat $dataDir/dev_ci_indicator` != "UNLOCKED" ]
+  then
+    exit
+fi
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo "Error: Server ID File Not Found: - "`date '+%Y%m%d'_'%H:%M:%S:%N'` >> $actionLogFile
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+# Verify that Enterprise master indicator file is present
+if [ ! -f /root/enterprise_master_server ]
+  then
+    echo "Error: Master Server File Not Found: Server "$serverId" - "`date '+%Y%m%d'_'%H:%M:%S:%N'` >> $actionLogFile
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_master_server - See server Administrator"
+    echo
+    exit
+fi
+read masterServer < /root/enterprise_master_server
+
+# Process
+if [ $masterServer == "true" ]
+   then
+       if [ $actionStatus == "UNLOCKED" ]
+           then 
+               if [ $action == "changeProdInstances" ]
+                  then
+                       echo "PROCESSING" > $dataDir/dev_action_status
+                       $scriptDir/ent_changeprod_instances $appName $appInstances $requesterId 
+                       echo "UNLOCKED" > $dataDir/dev_action_status
+                       echo "UNLOCKED" > /enterprise_system/admin/data/console_action_indicator
+               fi
+               if [ $action == "addListener" ]
+                  then
+                       echo "PROCESSING" > $dataDir/dev_action_status
+                       $scriptDir/ent_add_listener $appName 1 $requesterId
+                       echo "UNLOCKED" > $dataDir/dev_action_status
+                       echo "UNLOCKED" > /enterprise_system/admin/data/console_action_indicator
+               fi 
+               if [ $action == "addWebsite" ]
+                  then
+                       echo "PROCESSING" > $dataDir/dev_action_status
+                       $scriptDir/ent_add_website $appName $requesterId
+                       echo "UNLOCKED" > $dataDir/dev_action_status
+                       echo "UNLOCKED" > /enterprise_system/admin/data/console_action_indicator
+               fi 
+               if [ $action == "deleteApp" ]
+                  then
+                       echo "PROCESSING" > $dataDir/dev_action_status
+                       $scriptDir/ent_delete_app $appName $requesterId
+                       echo "UNLOCKED" > $dataDir/dev_action_status
+                       echo "UNLOCKED" > /enterprise_system/admin/data/console_action_indicator
+               fi 
+               if [ $action == "recycleListeners" ]
+                  then
+                       echo "PROCESSING" > $dataDir/dev_action_status
+                       $scriptDir/ent_recycle_dev_listeners READYFORFAILOVER
+               fi 
+               if [ $action == "refreshBatch" ]
+                  then
+                       echo "PROCESSING" > $dataDir/dev_action_status
+                       $scriptDir/ent_refresh_batch dev READYFORFAILOVER
+               fi 
+       fi
+fi
+if [ $masterServer == "false" ]
+   then
+       if [ $actionStatus == "READYFORFAILOVER" ]
+           then 
+               echo "PROCESSINGFAILOVER" > $dataDir/dev_action_status
+               if [ $action == "recycleListeners" ]
+                  then
+                       $scriptDir/ent_recycle_dev_listeners READYFORUNLOCK
+               fi
+               if [ $action == "refreshBatch" ]
+                  then
+                       $scriptDir/ent_refresh_batch dev READYFORUNLOCK
+               fi
+        
+               exit
+
+       fi
+       if [ $actionStatus == "READYFORUNLOCK" ]
+           then
+               echo "UNLOCKED" > /enterprise_system/admin/data/console_action_indicator
+               echo "UNLOCKED" > $dataDir/dev_action_status
+       fi
+fi
+
+exit
+
+

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+service ntp start
+
+source /root/anaconda3/bin/activate ### INSERT: ANACONDA_ENV
+python /shared_volume/python_codebase/### INSERT: PROGRAM_NAME.py --ip=0.0.0.0 ### INSERT: PORT ### INSERT: SERVERNAME ### INSERT: CONTAINERNAME > /shared_splunk/### INSERT: LOGID.log 2>&1 
+source /root/anaconda3/bin/deactivate
+
+exit
+

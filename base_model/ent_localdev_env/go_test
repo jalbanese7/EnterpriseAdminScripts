@@ -1,0 +1,53 @@
+#!/bin/bash
+
+clear
+if [ "$#" -ne 1 ]; then
+    echo
+    echo "Usage: go_test <<Test Program Name with .py Extension>>"
+    echo
+    exit
+fi
+
+size=${#1}
+firstChar=${1:0:1}
+if [ $firstChar != "t" ]
+  then
+    echo
+    echo "Error: Test Programs must beigin with t"
+    echo
+    exit
+fi
+
+if [ `echo $1|grep -c "\.py"` -eq 0 ]
+  then
+    echo
+    echo "Error: Extension .py is missing"
+    echo
+    exit
+fi
+
+if [ ! -f /shared_volume/python_codebase/$1 ]
+  then
+    echo
+    echo "Error: Test Program "$1" not found in directory /shared_volume/python_codebase"
+    echo
+    exit
+fi
+
+programType=${1:1:1}
+if [ $programType == "l" ]
+  then
+   condaEnvBuf=${1:1:$size}
+   condaEnv=${1:1:$size-4}
+   targetListener=${1:1:$size}
+   kill -9 `pidof python` > /dev/null 2>&1
+   source /root/anaconda3/bin/activate $condaEnv
+   python /shared_volume/python_codebase/$targetListener --ip=0.0.0.0 --port=9999 --servername=developer_workstation --containername=development_listener_9999_local &
+   #source /root/anaconda3/bin/deactivate
+fi
+
+cd /shared_volume/python_codebase/
+py.test $1
+
+exit
+

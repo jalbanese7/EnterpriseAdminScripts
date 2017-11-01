@@ -1,0 +1,91 @@
+#!/bin/bash
+
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016 
+###########################################################################################
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo;
+tput smso;
+tput blink;
+echo "                        Clearing All Instances                            "
+tput sgr0;
+echo "=========================================================================="
+echo;echo;echo
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+envUpperCase=`echo $serverId|tr [a-z] [A-Z]|cut -d '_' -f1`
+
+splunkLogDir="/root/enterprise_admin_splunk"
+adminLogFile=$splunkLogDir"/ent_admin_audit.log"
+
+rm /enterprise_system/admin/monitor_urls/$serverId/* > /dev/null 2>&1
+rm /tmp/dockerInstances* > /dev/null 2>&1
+docker ps -a > /tmp/dockerOldInstances1
+awk 'BEGIN {FS=" " }
+{
+   if ($0 ~ "CONTAINER") {
+      next;
+   }
+   print $1;
+}
+' /tmp/dockerOldInstances1 > /tmp/dockerOldInstances2
+
+for ID in `cat /tmp/dockerOldInstances2`
+do
+   docker stop $ID
+   docker rm -v $ID
+done
+
+rm /tmp/dockerInstances* > /dev/null 2>&1
+docker images > /tmp/dockerOldInstances1
+awk -v env="$userSpecifiedEnv" 'BEGIN {FS=" " }
+{
+   if ($0 !~ "ent_app_") {
+      next;
+   }
+   print $1;
+}
+' /tmp/dockerOldInstances1 > /tmp/dockerOldInstances2
+
+for ID in `cat /tmp/dockerOldInstances2`
+do
+   docker rmi $ID
+done
+
+rm /enterprise_system/admin/python_templates/ent_app_* > /dev/null 2>&1
+rm -rf /enterprise_system/admin/app_models/ent* > /dev/null 2>&1
+rm /enterprise_system/admin/app_scripts/ent_* > /dev/null 2>&1
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo "=========================================================================="
+echo;echo;echo
+
+
+echo
+echo "All Enterprise instances have been cleared."
+echo
+echo;echo;echo
+
+echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=Container Management ent_action=Clear Environment ent_message_type=info ent_message=Active Enterprise Containers and related processes have been cleared in environment $envUpperCase " >> $adminLogFile
+
+exit
+
+

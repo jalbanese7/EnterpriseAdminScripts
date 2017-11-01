@@ -1,0 +1,12 @@
+#!/bin/bash
+###
+## Called from the docker control panel container, which contains a mapped
+## host system directory reference to /shared_entdata. This directory points
+## to host directory /enterprise_system/admin/data.
+###
+
+dataDir="/shared_entdata"
+
+echo $1 > $dataDir/console_action_indicator
+
+exit

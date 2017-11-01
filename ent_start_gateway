@@ -1,0 +1,75 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#         Ports 8000 and 9999 are Enterprise App reserved ports
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016 
+###########################################################################################
+
+if [ $# -eq 0 ]
+  then
+    echo
+    echo "Usage: ent_start_gateway <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+
+dataDir="/enterprise_system/administration/data"
+userSpecifiedEnv=$1
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+ports="443:443"
+splunkLogDir="/root/enterprise_admin_splunk"
+adminLogFile=$splunkLogDir"/ent_admin_audit.log"
+
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo;
+tput smso;
+tput blink;
+echo "                 Starting 'App Gateway' - Please wait...                  "
+tput sgr0;
+echo "=========================================================================="
+echo;echo;echo
+
+read clientEmail < /enterprise_system/admin/data/guardian_email
+read activeContainerVer < $dataDir/active_container_ver
+fullNginxVer="ent_"$activeContainerVer"_nginx"
+fullGatewayName="ent_"$activeContainerVer"_gateway"
+
+enterprise_system=`cat /enterprise_system/administration/data/ent_env|cut -d'^' -f1`
+appName=$fullGatewayName"_"$userSpecifiedEnv
+
+docker stop $appName
+docker rm -v $appName 
+docker run --name $appName -v $enterprise_system/$userSpecifiedEnv/websites:/shared_websites:ro -v $enterprise_system/administration/nginx_gateway_config/$userSpecifiedEnv:/etc/nginx/conf.d:ro -v $enterprise_system/administration/nginx_gateway_logs/$userSpecifiedEnv:/var/log/nginx -v $enterprise_system/administration/nginx_ssl:/etc/nginx/ssl:ro -p $ports -d $fullNginxVer 
+
+echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=Gateway Management ent_action=Start Gateway Proxy ent_message_type=info ent_message=The Gateway has been restarted for environment $envUpperCase " >> $adminLogFile
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo;
+echo "=========================================================================="
+echo;echo;echo
+
+echo
+echo "Gateway has been started for environment $userSpecifiedEnv"
+echo
+echo;echo;echo
+
+exit

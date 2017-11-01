@@ -1,0 +1,97 @@
+#/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016
+###########################################################################################
+
+userSpecifiedEnv="prod"
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+# Verify that Enterprise master indicator file is present
+if [ ! -f /root/enterprise_master_server ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_master_server - See server Administrator"
+    echo
+    exit
+fi
+read masterServer < /root/enterprise_master_server
+
+clear
+echo "==========================================================================" 
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase" 
+echo;
+tput smso;
+tput blink;
+echo "                 Starting Enterprise Control Panel...                     "
+tput sgr0;
+echo "==========================================================================" 
+echo;echo;echo
+
+dataDir="/enterprise_system/administration/data"
+driverFile="/enterprise_system/administration/data/ent_app_driver.conf"
+appScriptBaseDir="/enterprise_system/administration/app_scripts/base_script"
+appScriptDir="/enterprise_system/administration/app_scripts"
+appModelBaseDir="/enterprise_system/administration/app_models/base_model"
+appModelDir="/enterprise_system/administration/app_models"
+pythonTemplateDir="/enterprise_system/administration/python_templates"
+pythonWrapperDestDir="/enterprise_system/$userSpecifiedEnv/services/guardian/script_wrappers"
+nginxDir="/enterprise_system/administration/nginx_gateway_config/$userSpecifiedEnv"
+nginxLogs="/enterprise_system/administration/nginx_gateway_logs/$userSpecifiedEnv"
+nginxModelTemplates="/enterprise_system/administration/nginx_gateway_config/templates"
+botoScriptDir="/enterprise_system/administration/aws_boto"
+botoDataDir="/enterprise_system/administration/aws_admin_data"
+guardianBotoLbDir="/enterprise_system/administration/data/guardian_lb"
+
+
+read loadBalancerZoneId < $guardianBotoLbDir/$userSpecifiedEnv"_hostedzoneid"
+read loadBalancerDns < $guardianBotoLbDir/$userSpecifiedEnv"_dns"
+read activeContainerVer < $dataDir/active_container_ver
+fullCondaVer="ent_"$activeContainerVer"_anaconda"
+
+# App Model
+rm -rf $appModelDir/ent_console > /dev/null 2>&1
+mkdir $appModelDir/ent_console
+cp -r $appModelBaseDir/ent_console/* $appModelDir/ent_console
+cd $appModelDir/ent_console
+sed -i "s/### INSERT: ENTANACONDA/$fullCondaVer/g" $appModelDir/ent_console/Dockerfile
+docker stop ent_console
+docker rm -v ent_console
+docker rmi ent_console_10100_prod 
+docker build -t ent_console_10100_prod .
+
+# Start Control Panel Listener
+docker run --name ent_console -v /enterprise_system/administration/admin_scripts:/shared_scripts -v /enterprise_system/administration/data:/shared_entdata -v /enterprise_system/administration/data:/shared_entdata -v /root/enterprise_admin_splunk:/shared_splunk -p 10100:10100 -d ent_console_10100_prod
+
+# GoDaddy and Internal Required Entry Information
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo "--------------------------------------------------------------------------"
+tput smso;
+echo "                 Enterprise Control Panel has been Started                "
+tput rmso;
+echo "--------------------------------------------------------------------------"
+
+echo;echo;echo
+
+exit
+
+
+

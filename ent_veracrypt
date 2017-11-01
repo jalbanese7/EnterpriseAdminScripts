@@ -1,0 +1,21 @@
+#/bin/bash
+
+# Create veracrypt volume - repeat for hidden drive while pointing to primary encrypted veracrypt file
+# veracrypt -t -c
+
+# Mount veracrypt volume - normal and hidden file systems - answer normal and hidden password prompts
+# veracrypt -t -k "" --protect-hidden=no /mnt/nfs/awsefs/guardian_nonprod_veracrypt /mnt/nfs/awsefs/guardian_nonprod_volume
+
+# Dismount a volume:
+# veracrypt -d /mnt/nfs/awsefs/guardian_nonprod_volume
+
+# Dismount all mounted volumes:
+# veracrypt -d
+
+
+# Current Volumes
+#veracrypt -t -k "" --protect-hidden=no /mnt/nfs/awsefs/ga_veracrypt /mnt/nfs/awsefs/enterprise_system
+#veracrypt -t -k "" --protect-hidden=no /mnt/nfs/awsefs/guardian_nonprod_veracrypt /mnt/nfs/awsefs/guardian_nonprod_volume
+#veracrypt -t -k "" --protect-hidden=no /mnt/nfs/awsefs/guardian_prod_veracrypt /mnt/nfs/awsefs/guardian_prod_volume
+
+

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+### INSERT: ENV
+
+rm /enterprise_system/$ENV/shared_areas/luigi_status_files/### INSERT: SCENARIONAME/* > /dev/null 2>&1 
+
+source /root/anaconda3/bin/activate batch_luigi 
+python /enterprise_system/$ENV/services/guardian/batch_python_scenarios/### INSERT: SCENARIONAME.py 
+source /root/anaconda3/bin/deactivate
+
+exit
+

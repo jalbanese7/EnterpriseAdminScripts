@@ -1,0 +1,55 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 11/08/2016
+###########################################################################################
+
+if [ $# -ne 3 ]
+  then
+    echo
+    echo "Usage: ent_changeprod_instances <<Case Sensitive App Name>> <<# of Occurrences>> <<Requester Id>>"
+    echo
+    exit
+fi
+
+dataDir="/enterprise_system/administration/data"
+dataFile="$dataDir/ent_app_driver.conf"
+appName=$1
+appOcc=$2
+appReq=$3
+searchAppName="\^"$appName"\^"
+
+read activeDomain < $dataDir/active_domain
+dataStageDir="/enterprise_system/administration/data/guardian_tmp"
+dataTmpFile="$dataStageDir/prod_instances_tmp"
+dataStageFile="$dataStageDir/prod_instances"
+
+if [ -f $dataStageFile ]
+   then
+       cp $dataStageFile $dataTmpFile
+       rm $dataStageFile > /dev/null 2>&1 
+       awk -v target="$appName" ' BEGIN{}
+       {
+           if ( $0 ~ appName) {
+               next;
+           }
+           print $0;
+       }
+       ' $dataTmpFile >> $dataStageFile
+       rm $dataTmpFile > /dev/null 2>&1 
+fi
+
+rowToAdd=$appName"^"$appOcc
+echo $rowToAdd >> $dataStageFile
+
+read clientEmail < /enterprise_system/admin/data/guardian_email
+wget "https://console."$activeDomain".com/sendemail?to=$clientEmail&subject=Enterprise Administrative Alert&msg=Developer "$appReq" changed the number of production listener instances for app "$appName" to "$appOcc". The change will be activitated during the PROD promotion cycle. See Splunk for details."
+rm ./sendemail* > /dev/null 2>&1
+
+exit
+
+

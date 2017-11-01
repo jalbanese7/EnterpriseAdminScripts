@@ -1,0 +1,5 @@
+upstream ### INSERT: UPSTREAM_DNS
+{
+       ### INSERT: UPSTREAM_SERVICE_DETAILS 
+}
+

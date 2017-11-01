@@ -1,0 +1,54 @@
+#!/bin/bash
+
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 8/5/2016
+###########################################################################################
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo;
+tput smso;
+tput blink;
+echo "                  Clearing All Orphaned Docker Images                     "
+tput sgr0;
+echo "=========================================================================="
+echo;echo;echo
+
+rm /tmp/dockerInstances* > /dev/null 2>&1
+docker images > /tmp/dockerOldInstances1
+awk 'BEGIN {FS=" " }
+{
+   if ($0 !~ "<none>") {
+      next;
+   }
+   split($0, f);
+   printf "%s\n", f[3];
+}
+' /tmp/dockerOldInstances1 > /tmp/dockerOldInstances2
+
+for ID in `cat /tmp/dockerOldInstances2`
+do
+   docker rmi -f $ID
+done
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo "=========================================================================="
+echo;echo;echo
+
+
+echo
+echo "All Enterprise orphaned Docker Images have been cleared."
+echo
+echo;echo;echo
+
+exit
+
+

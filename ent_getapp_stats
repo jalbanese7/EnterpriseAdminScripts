@@ -1,0 +1,161 @@
+#/bin/bash
+
+driverFile="/enterprise_system/admin/data/ent_app_driver.conf"
+dataStageDir="/enterprise_system/administration/data/guardian_tmp"
+dataStageFile="$dataStageDir/prod_instances"
+fileOut="/enterprise_system/admin/data/guardian_appstats/appmanagement.json"
+PythonServicesDEV="/mnt/nfs/awsefs/PythonServicesDEV"
+AnacondaEnvironments="/mnt/nfs/awsefs/AnacondaEnvironments"
+
+echo "{" > $fileOut
+echo '"listeners":[' >> $fileOut
+itemCnt=`cat $driverFile|grep "listener"|grep "\^dev\^"|wc -l`
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type listener 
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowEnv != "dev" ] 
+      then
+        continue 
+    fi
+    if [ $rowType != "listener" ] 
+      then
+        continue 
+    fi
+    rowAppName=`echo $R|cut -d'^' -f3`
+    prodInstances=`cat $driverFile|grep "listener"|grep $rowAppName|grep "\^prod\^"|cut -d'^' -f4`
+    if [ `echo $prodInstances|wc -c` -eq 1 ]
+      then
+         prodInstances="1"
+    fi
+    if [ `cat $dataStageFile|grep -c $rowAppName` -gt 0 ]
+      then
+          prodStageInstances=`cat $dataStageFile|grep $rowAppName|cut -d'^' -f2`
+          prodInstances=$prodStageInstances
+    fi
+    appService=$rowAppName".py"
+    testAppService="t"$rowAppName".py"
+    configService=$rowAppName".yml"
+    if [ -f $PythonServicesDEV/$appService ]
+      then
+         serviceStatus="pass"
+    else 
+         serviceStatus="fail"
+    fi
+    if [ -f $AnacondaEnvironments/$configService ]
+      then
+         configServiceStatus="pass"
+    else
+         configServiceStatus="fail"
+    fi
+    if [ -f $PythonServicesDEV/$testAppService ]
+      then
+         testServiceStatus="pass"
+    else
+         testServiceStatus="fail"
+    fi
+    cnt=`expr $cnt + 1`
+    if [ $cnt -eq $itemCnt ]
+      then
+          echo '{"appname":"'$rowAppName'", "prodinstances":"'$prodInstances'", "servicestatus":"'$serviceStatus'", "configstatus":"'$configServiceStatus'", "teststatus":"'$testServiceStatus'"}' >> $fileOut
+    else
+          echo '{"appname":"'$rowAppName'", "prodinstances":"'$prodInstances'", "servicestatus":"'$serviceStatus'", "configstatus":"'$configServiceStatus'", "teststatus":"'$testServiceStatus'"},' >> $fileOut
+    fi
+
+done
+echo "]," >> $fileOut
+
+echo '"websites":[' >> $fileOut
+itemCnt=`cat $driverFile|grep "website"|grep "\^dev\^"|wc -l`
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type website
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowType != "website" ] 
+      then
+        continue 
+    fi
+    if [ $rowEnv != "dev" ] 
+      then
+        continue 
+    fi
+    rowAppName=`echo $R|cut -d'^' -f3`
+    cnt=`expr $cnt + 1`
+    if [ $cnt -eq $itemCnt ]
+      then
+          echo '{"appname":"'$rowAppName'"}' >> $fileOut
+    else
+          echo '{"appname":"'$rowAppName'"},' >> $fileOut
+    fi
+
+done
+echo "]," >> $fileOut
+
+echo '"batchscenarios":[' >> $fileOut
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type website
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowType != "batch" ]
+      then
+        continue
+    fi
+    if [ $rowEnv != "dev" ]
+      then
+        continue
+    fi
+    rowMode=`echo $R|cut -d'^' -f6`
+    if [ $rowMode == "F" -o $rowMode == "S"  -o $rowMode == "B" ]
+       then
+          cnt=`expr $cnt + 1`
+    fi
+done
+
+itemCnt=$cnt
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type website
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowType != "batch" ]
+      then
+        continue
+    fi
+    if [ $rowEnv != "dev" ]
+      then
+        continue
+    fi
+    rowAppName=`echo $R|cut -d'^' -f3`
+    rowMode=`echo $R|cut -d'^' -f6`
+    if [ $rowMode == "F" -o $rowMode == "S"  -o $rowMode == "B" ]
+       then
+          mode="Standard"
+          if [ $rowMode == "B" ]
+            then
+               mode="Background"
+          fi
+          cnt=`expr $cnt + 1`
+          if [ $cnt -eq $itemCnt ]
+             then
+                 echo '{"appname":"'$rowAppName'", "mode":"'$mode'"}' >> $fileOut
+          else
+                 echo '{"appname":"'$rowAppName'", "mode":"'$mode'"},' >> $fileOut
+          fi
+    fi
+
+done
+echo "]" >> $fileOut
+echo "}" >> $fileOut
+
+
+exit
+
+
+

@@ -1,0 +1,25 @@
+name: enterprise_admin
+dependencies:
+- boto=2.40.0=py35_0
+- cherrypy=3.8.0=py35_0
+- docutils=0.12=py35_2
+- jmespath=0.9.0=py35_0
+- mkl=11.3.3=0
+- numpy=1.11.1=py35_0
+- openssl=1.0.2h=1
+- pip=8.1.2=py35_0
+- python=3.5.2=0
+- python-dateutil=2.5.3=py35_0
+- pytz=2016.6.1=py35_0
+- readline=6.2=2
+- setuptools=25.1.6=py35_0
+- simplejson=3.8.2=py35_0
+- six=1.10.0=py35_0
+- sqlite=3.13.0=0
+- tk=8.5.18=0
+- wheel=0.29.0=py35_0
+- xz=5.2.2=0
+- zlib=1.2.8=3
+- pip:
+  - bottle==0.12.9
+

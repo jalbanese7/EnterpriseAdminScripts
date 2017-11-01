@@ -1,0 +1,176 @@
+#/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 11/03/2016
+###########################################################################################
+
+read serverId < /root/enterprise_server_id
+read masterServer < /root/enterprise_master_server
+userSpecifiedEnv=`echo $serverId|cut -d'_' -f1`
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+
+dataDir="/enterprise_system/administration/data"
+driverFile="/enterprise_system/administration/data/ent_app_driver.conf"
+lisResultFile=$dataDir"/guardian_activity/"$serverId"_listeners"
+webResultFile=$dataDir"/guardian_activity/"$serverId"_web"
+batchResultFile=$dataDir"/guardian_activity/"$serverId"_batch"
+gatewayResultFile=$dataDir"/guardian_activity/"$serverId"_gateway"
+websiteDir="/enterprise_system/$userSpecifiedEnv/websites"
+batchScenarioDir="/enterprise_system/$userSpecifiedEnv/services/guardian/batch_run_scripts"
+
+# Determine running listener names
+activityFile1=$serverId"_activity1"
+activityFile2=$serverId"_activity2"
+rm /tmp/$activityFile > /dev/null 2>&1
+docker ps > /tmp/$activityFile1
+awk -v env="$userSpecifiedEnv" 'BEGIN {FS=" " }
+{
+   if ($0 !~ "_listener_") {
+      next;
+   }
+   split($0, rowBuf, " ");
+   split(rowBuf[2], rowEnv, "_")
+   if (rowEnv[6] !~ env) {
+      next;
+   }
+   print rowBuf[2]
+}
+' /tmp/$activityFile1 > /tmp/$activityFile2 
+
+rm $lisResultFile > /dev/null 2>&1
+recCnt=0
+# Determine active status for each listener app defined in main app driver file - by active server environment
+for R in `cat $driverFile`
+do
+    # Filter by environment and type listener 
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    rowAppIdName=`echo $R|cut -d'^' -f3`
+    lowerCaseAppId=${rowAppIdName,,}
+    if [ $rowEnv != $userSpecifiedEnv ]
+      then
+        continue
+    fi
+    if [ $rowType != "listener" ]
+      then
+        continue
+    fi
+
+    # No running containers 
+    if [ `cat /tmp/$activityFile2|wc -l` -eq 0 ]
+       then
+           recCnt=`expr $lisCnt + 1`
+           echo $rowAppIdName"^inactive^0^0" >> $lisResultFile
+           continue
+    fi
+
+    # Running containers exist
+    if [ `cat /tmp/$activityFile2 | grep -c $lowerCaseAppId` -gt 0 ]
+       then
+           cnt=0
+           for N in `cat /tmp/$activityFile2|grep $lowerCaseAppId`
+           do
+              cnt=`expr $cnt + 1`
+              port=`echo $N|cut -d '_' -f5`
+              echo $rowAppIdName"^active^"$cnt"^"$port >> $lisResultFile 
+              recCnt=`expr $lisCnt + 1`
+           done
+    else
+           echo $rowAppIdName"^inactive^0^0" >> $lisResultFile 
+           recCnt=`expr $lisCnt + 1`
+    fi
+
+done
+if [ $recCnt -eq 0 ]
+  then
+     # No data - create placeholder entry
+     echo "nodata^^^" >> $lisResultFile 
+fi
+
+
+rm $webResultFile > /dev/null 2>&1
+recCnt=0
+# Determine active status for each website app defined in main app driver file - by active server environment
+for R in `cat $driverFile`
+do
+    # Filter by environment and type listener 
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    rowAppIdName=`echo $R|cut -d'^' -f3`
+    lowerCaseAppId=${rowAppIdName,,}
+    if [ $rowEnv != $userSpecifiedEnv ]
+      then
+        continue
+    fi
+    if [ $rowType != "website" ]
+      then
+        continue
+    fi
+
+    if [  -d $websiteDir/$rowAppIdName ]
+       then
+           echo $rowAppIdName"^active" >> $webResultFile
+           recCnt=`expr $lisCnt + 1`
+    else
+           echo $rowAppIdName"^inactive" >> $webResultFile
+           recCnt=`expr $lisCnt + 1`
+    fi
+
+done
+if [ $recCnt -eq 0 ]
+  then
+     # No data - create placeholder entry
+     echo "nodata^" >> $lisResultFile                        
+fi
+
+rm $batchResultFile > /dev/null 2>&1
+recCnt=0
+# Determine active status for each batch app defined in main app driver file - by active server environment
+for R in `cat $driverFile`
+do
+    # Filter by environment and type listener 
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    rowAppIdName=`echo $R|cut -d'^' -f3`
+    lowerCaseAppId=${rowAppIdName,,}
+    if [ $rowEnv != $userSpecifiedEnv ]
+      then
+        continue
+    fi
+    if [ $rowType != "batch" ]
+      then
+        continue
+    fi
+
+    kickoffScript="ent_app_"$rowAppIdName
+    if [  -f $batchScenarioDir/$kickoffScript ]
+       then
+           echo $rowAppIdName"^active" >> $batchResultFile
+           recCnt=`expr $lisCnt + 1`
+    else
+           echo $rowAppIdName"^inactive" >> $batchResultFile
+           recCnt=`expr $lisCnt + 1`
+    fi
+
+done
+if [ $recCnt -eq 0 ]
+  then
+     # No data - create placeholder entry
+     echo "nodata^" >> $lisResultFile    
+fi
+
+rm $gatewayResultFile > /dev/null 2>&1
+if [ `docker ps|grep -c startNtpNginx` -gt 0 ]
+   then
+       echo "gatewway^active" >> $gatewayResultFile 
+else
+       echo "gatewway^inactive" >> $gatewayResultFile 
+fi
+
+exit
+
+

@@ -1,0 +1,21 @@
+#!/bin/bash
+
+if [ "$#" -lt 1 ]; then
+    echo
+    echo "Usage: go_batch <Anaconda Env>>"
+    echo
+    exit
+fi
+
+kill -9 `pidof python` > /dev/null 2>&1
+cmdArgs="localscenario,localbatchtask"
+
+targetProgram=$1".py"
+source /root/anaconda3/bin/activate $1
+python /shared_volume/python_codebase/$targetProgram --servername=developer_batch_local --containername=developer_batch_local --cmdargs=$cmdArgs
+#source /root/anaconda3/bin/deactivate
+
+exit
+
+
+

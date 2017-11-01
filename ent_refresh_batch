@@ -1,0 +1,375 @@
+#/bin/bash
+
+########################################################################################################
+# Comments:
+#  Driving data structure example:
+#   batch^dev^testscenario1^testbatch1^arg1,arg2,arg3^F^dependenttask1
+#     "batch = Enterprise Instance Type
+#     "dev" = Runtime Environment - Options dev, uat, test, and prod
+#     "testscenario1" = Job task master grouping if referred to as a scenario.
+#     "testbatch1" = App name. Note that associated Python program needs to be in file name
+#                    format ent_app_testbatch1 and checked into BitBucket repository
+#                    PythonServices.
+#     "arg1,arg2,arg3" = Comma seperated list of Batch Python program input arguments. 
+#     "Task Level Identifier" = Is this a F for first task in process chain, L for last task, M for
+#                               mid-level task, S for single task with no other task dependencies, or
+#                               B for single task with no other task dependencies that runs
+#                               as a Linux background task, which could poll a directory for example.
+#     "dependenttask1" = Task dependency
+#
+#--------------------------------------------------------------------------------------------------------
+# Author: John Albanese
+# Last Revision: 10/08/2016
+#########################################################################################################
+
+if [ $# -lt 2 ]
+  then
+    echo
+    echo "Usage: ent_refresh_batchjobs <<prod>> <<uat>> <<test>> <<dev>> and <<Ending Status Indicator>>"
+    echo
+    exit 
+fi
+
+userSpecifiedEnv=$1
+endingStatusIndicator=$2
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+if [ $userSpecifiedEnv == "dev" ]
+  then
+      msg="DEV - Refreshing Batch Environment..."
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_nonprod_volume/$userSpecifiedEnv"
+elif [ $userSpecifiedEnv == "test" ]
+  then
+      msg="TEST - Refreshing Batch Environment..."
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_nonprod_volume/$userSpecifiedEnv"
+elif [ $userSpecifiedEnv == "uat" ]
+  then
+      msg="UAT - Refreshing Batch Environment..."
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_nonprod_volume/$userSpecifiedEnv"
+elif [ $userSpecifiedEnv == "prod" ]
+  then
+      msg="PROD - Refreshing Batch Environment..."
+      privateClientArea="/mnt/nfs/awsefs/veracrypt_prod_volume/$userSpecifiedEnv"
+else
+    echo
+    echo "Usage: ent_refresh_batchjobs <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+       
+# Verify veracript volume is mounted and creds are readable
+cnt=`ls $privateClientArea/creds.json|wc -c`
+if [ $cnt -eq 0 ]
+   then
+      clear
+      echo;echo
+      tput smso
+      echo "Error - Action Required"
+      tput rmso
+      echo;echo
+      echo "The security team needs to mount the encrypted VeraCrypt volume using their secret password."
+      echo;echo
+      exit
+fi
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+# Verify that Enterprise master indicator file is present
+if [ ! -f /root/enterprise_master_server ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_master_server - See server Administrator"
+    echo
+    exit
+fi
+read masterServer < /root/enterprise_master_server
+
+clear
+echo "==========================================================================" 
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase" 
+echo;
+tput smso;
+tput blink;
+echo "                 Refreshing 'Batch Environment' - Please wait...          "
+tput sgr0;
+echo "==========================================================================" 
+echo;echo;echo
+
+dataDir="/enterprise_system/administration/data"
+driverFile="/enterprise_system/administration/data/ent_app_driver.conf"
+appScriptBaseDir="/enterprise_system/administration/app_scripts/base_script"
+appScriptDir="/enterprise_system/administration/app_scripts"
+appScriptBatchDockerDir="/enterprise_system/$userSpecifiedEnv/services/guardian/batch_docker_scripts"
+appScriptRunBatchDir="/enterprise_system/$userSpecifiedEnv/services/guardian/batch_run_scripts"
+appModelBaseDir="/enterprise_system/administration/app_models/base_model"
+appModelDir="/enterprise_system/administration/app_models"
+pythonTemplateDir="/enterprise_system/administration/python_templates"
+pythonWrapperDestDir="/enterprise_system/$userSpecifiedEnv/services/guardian/script_wrappers"
+pythonBatchScenarioDir="/enterprise_system/$userSpecifiedEnv/services/guardian/batch_python_scenarios"
+luigiStatusFileDir="/enterprise_system/$userSpecifiedEnv/shared_areas/luigi_status_files"
+batchStagingDir="/tmp/"$userSpecifiedEnv"_batch_staging"
+
+read clientEmail < /enterprise_system/admin/data/guardian_email
+splunkLogDir="/root/enterprise_admin_splunk"
+adminLogFile=$splunkLogDir"/ent_admin_audit.log"
+
+read activeContainerVer < $dataDir/active_container_ver
+fullCondaVer="ent_"$activeContainerVer"_anaconda"
+
+# Clear tmp files
+rm /enterprise_system/$userSpecifiedEnvdev/services/guardian/batch_python_scenarios/* > /dev/null 2>&1
+rm /enterprise_system/$userSpecifiedEnvdev/services/guardian/batch_docker_scripts/* > /dev/null 2>&1
+rm -rf $batchStagingDir* > /dev/null 2>&1
+mkdir $batchStagingDir
+
+# Clear existing running app listeners and inactive dormant app listeners within the user specified region 
+rm /tmp/dockerInstances* > /dev/null 2>&1
+docker images > /tmp/dockerOldInstances1
+awk -v env="$1" 'BEGIN {FS=" " }
+{
+  if ($0 ~ "REPOSITORY") {
+      next;
+   }
+   if ($0 ~ "_gateway_") {
+      next;
+   }
+   if ($0 ~ "_listener_") {
+      next;
+   }
+   if ($0 !~ "ent_app_") {
+      next;
+   }
+   split($0, rowEnvBuf, " ");
+   split(rowEnvBuf[1], rowEnv, "_")
+   if (rowEnv[6] !~ env) {
+      next;
+   }
+   print $1;
+}
+' /tmp/dockerOldInstances1 > /tmp/dockerOldInstances2
+
+for ID in `cat /tmp/dockerOldInstances2`
+do
+   docker stop $ID
+   docker rm -v $ID
+   docker rmi -f $ID
+done
+
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type batch 
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowEnv != $userSpecifiedEnv ] 
+      then
+        continue 
+    fi
+    if [ $rowType != "batch" ] 
+      then
+        continue 
+    fi
+
+    # App Model
+    cnt=`expr $cnt + 1`
+    rowAppIdName=`echo $R|cut -d'^' -f4`
+    scriptName="ent_app_"$rowAppIdName
+    anacondaEnvFile=$rowAppIdName".yml"
+    pythonConfigFile=$rowAppIdName".ini"
+    buf1="ent_app_"$rowAppIdName
+    rowAppId=$buf1
+    rm -rf $appModelDir/$rowAppId > /dev/null 2>&1
+    mkdir $appModelDir/$rowAppId
+    cp -r $appModelBaseDir/ent_app_batch/* $appModelDir/$rowAppId
+    cp $privateClientArea/creds.json $appModelDir/$rowAppId
+    cp /mnt/nfs/awsefs/AnacondaEnvironments/$anacondaEnvFile $appModelDir/$rowAppId/active_anaconda_env.yml
+    cp /mnt/nfs/awsefs/PythonConfig$envUpperCase/$pythonConfigFile $appModelDir/$rowAppId
+    sed -i "s/### INSERT: SCRIPTWRAPPER/$scriptName/g" $appModelDir/$rowAppId/Dockerfile
+    sed -i "s/### INSERT: ENTANACONDA/$fullCondaVer/g" $appModelDir/$rowAppId/Dockerfile
+    cd $appModelDir/$rowAppId
+    appName=${rowAppId,,}"_batch_"$userSpecifiedEnv 
+    docker stop $appName
+    docker rm -v $appName
+    docker rmi $appName
+    docker build -t $appName . 
+    rm $appModelDir/$rowAppId/creds.json
+    rm $appModelDir/$rowAppId/active_anaconda_env.yml
+    rm $appModelDir/$rowAppId/$pythonConfigFile
+
+    # Python Script Wrapper
+    buf1=`ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{print $1}' | tr [.] [_]`
+    cmdArgs=`echo $R|cut -d'^' -f5`
+    serverName="--servername="$serverId
+    containerName="--containername="$appName
+    upperCaseEnv=${rowEnv^^}
+    anacondaEnv=$rowAppIdName
+    rm $pythonTemplateDir/$rowAppId > /dev/null 2>&1
+    cp $pythonTemplateDir/base_batch_wrapper $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: ANACONDA_ENV/$anacondaEnv/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: PROGRAM_NAME/$rowAppIdName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: SERVERNAME/$serverName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: CONTAINERNAME/$containerName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: CMDARGS/$cmdArgs/g" $pythonTemplateDir/$rowAppId
+    cp $pythonTemplateDir/$rowAppId $pythonWrapperDestDir/$rowAppId
+
+    # App Script
+    cp $appScriptBaseDir/ent_app_batch $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: ENV/ENV=\"$userSpecifiedEnv\"/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_NAME/$appName/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_MODEL_NAME/$appName/g" $appScriptDir/$rowAppId
+    cp $appScriptDir/$rowAppId $appScriptBatchDockerDir
+
+    # Stage luigi task meta data 
+    stage_scenario=`echo $R|cut -d'^' -f3` 
+    echo $R >> $batchStagingDir/$stage_scenario
+
+done
+
+# Create Luigi .py program and execution script for each scenario
+for F in `ls $batchStagingDir`
+do
+    fileName="ent_app_"$F".py"
+    runFileName="ent_app_"$F
+    cp $pythonTemplateDir/base_luigi_header $pythonTemplateDir/$fileName
+    cp $pythonTemplateDir/base_luigi_run_scenario $appScriptRunBatchDir/$runFileName
+    sed -i "s/### INSERT: ENV/ENV=\"$userSpecifiedEnv\"/g" $appScriptRunBatchDir/$runFileName
+    sed -i "s/### INSERT: SCENARIONAME/$runFileName/g" $appScriptRunBatchDir/$runFileName 
+done
+
+# Establish task def method(s)
+for F in `ls $batchStagingDir`
+do
+  for S in `cat $batchStagingDir/$F`
+  do
+    last_task=`echo $S|cut -d'^' -f6`
+    task_name=`echo $S|cut -d'^' -f4`
+    task_name_noprefix=`echo $task_name|cut -d'-' -f2`
+    dependent_task_method_name_buf="["`echo $S|cut -d'^' -f7|cut -d'-' -f2`
+    cmdArgs=`echo $S|cut -d'^' -f5`
+    dependent_task_method_name=""
+    fileScenarioName="ent_app_"$F
+    fullFileScenarioName="ent_app_"$F".py"
+    fullTaskName="ent_app_"$task_name
+    if [ `echo $cmdArgs|wc -c` -eq 1 ]
+      then
+         shellTaskNameWithArg="ent_app_"$task_name" "$fileScenarioName,$fullTaskName
+    else
+         shellTaskNameWithArg="ent_app_"$task_name" "$fileScenarioName,$fullTaskName,$cmdArgs
+    fi
+    if [ $last_task == 'L' -o $last_task == 'S' -o $last_task == 'B' ]
+      then
+           cat $pythonTemplateDir/base_luigi_def_nodep >> $pythonTemplateDir/$fullFileScenarioName
+    else
+           cat $pythonTemplateDir/base_luigi_def >> $pythonTemplateDir/$fullFileScenarioName
+           dependent_task_method_name=$dependent_task_method_name_buf"()]"
+           sed -i "s/### INSERT: DEPENDSONTASK/$dependent_task_method_name/g" $pythonTemplateDir/$fullFileScenarioName
+    fi
+    sed -i "s/### INSERT: TASKNAME/$task_name_noprefix/g" $pythonTemplateDir/$fullFileScenarioName
+    sed -i "s/### INSERT: SCENARIONAME/$fileScenarioName/g" $pythonTemplateDir/$fullFileScenarioName
+    sed -i "s/### INSERT: FULLTASKNAME/$fullTaskName/g" $pythonTemplateDir/$fullFileScenarioName
+    sed -i "s/### INSERT: SHELLTASKNAMEWITHARG/$shellTaskNameWithArg/g" $pythonTemplateDir/$fullFileScenarioName
+    sed -i "s/### INSERT: ENV/$userSpecifiedEnv/g" $pythonTemplateDir/$fullFileScenarioName 
+    targetDir=$luigiStatusFileDir/$fileScenarioName
+    if [ ! -d $targetDir ]
+      then
+         mkdir $targetDir
+    fi
+    rm -rf $targetDir/$fullTaskName > /dev/null 2>&1
+  done
+done
+
+#  Establish job stream main entry point
+for F in `ls $batchStagingDir`
+do
+  last_task_name=""
+  for S in `cat $batchStagingDir/$F`
+  do
+    last_task=`echo $S|cut -d'^' -f6`
+    task_name=`echo $S|cut -d'^' -f4`
+    if [ $last_task == 'F' -o $last_task == 'S' -o $last_task == 'B' ]
+      then
+         last_task_name=`echo $task_name|cut -d '-' -f2`
+    else
+         continue
+    fi
+  done
+  fileScenarioName="ent_app_"$F".py"
+  cat $pythonTemplateDir/base_luigi_main >> $pythonTemplateDir/$fileScenarioName
+  sed -i "s/### INSERT: TASKNAME/$last_task_name/g" $pythonTemplateDir/$fileScenarioName
+  cp $pythonTemplateDir/$fileScenarioName $pythonBatchScenarioDir 
+done
+
+if [ $userSpecifiedEnv == "prod" ]
+  then
+
+       # Add commented-out batch entries to /etc/crontab file for scheduling adjustment purposes 
+       for F in `ls $batchStagingDir`
+       do
+           runFileName="ent_app_"$F
+           fullRunFileName=$appScriptRunBatchDir"/"$runFileName
+           awk -v scenario="$fullRunFileName" -v env="$userDefinedEnv" ' BEGIN{flg=0;}
+           {
+               if ($0 ~ "Start: Enterprise System Batch Entries") {
+                   print $0;
+                   flg=1;
+                   next;
+               }
+               if (flg == 1 && $0 !~ "End: Enterprise System Batch Entries") {
+                   print $0;
+               }
+               if (flg == 1 && $0 ~ "End: Enterprise System Batch Entries") {
+                   printf "#* * * * *   root  %s\t%s\n\n", scenario, env;
+                   print $0;
+               }
+               if (flg == 0) {
+                   print $0;
+               }
+           } ' /etc/crontab >> /etc/tmp_crontab
+           mv /etc/tmp_crontab /etc/crontab
+       done
+
+       # Present adjust /etc/crontab file 
+       clear
+       echo;echo
+       tput smso;
+       echo "Instructions:"
+       tput rmso
+       echo "--------------------------------------------------------------------------"
+       tput smso;
+       echo "    Host system /etc/crontab file has been adjusted. Press <<ENTER>> to   "
+       echo "    modify scheduling details using the vi editor. Remove Enterprise      "
+       echo "    System entries that are no longer needed.                             "
+       tput rmso;
+       echo "--------------------------------------------------------------------------"
+       echo;echo
+       read pause
+       vi /etc/crontab
+fi
+
+echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=Batch Management ent_action=Refresh Batch Components ent_message_type=info ent_message=The Batch components have been refreshed and are ready for execution or scheduling in environment $envUpperCase " >> $adminLogFile
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo "--------------------------------------------------------------------------"
+tput smso;
+echo "                 Batch Environment Refresh has been Completed             "
+tput rmso;
+echo "--------------------------------------------------------------------------"
+echo;echo
+
+echo $endingStatusIndicator > $dataDir/dev_action_status
+
+exit
+
+
+

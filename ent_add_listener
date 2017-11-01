@@ -1,0 +1,44 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016
+###########################################################################################
+
+if [ $# -ne 3 ]
+  then
+    echo
+    echo "Usage: ent_add_listener <<Case Sensitive App Name>> <<# of Occurrences>> <<Requester Id>>"
+    echo
+    exit
+fi
+
+dataDir="/enterprise_system/administration/data"
+dataFile="$dataDir/ent_app_driver.conf"
+appName=$1
+appOcc=$2
+appReq=$3
+searchAppName="\^"$appName"\^"
+
+read activeDomain < $dataDir/active_domain
+
+if [ `cat $dataFile|grep -c $searchAppName` -gt 0 ]
+  then
+      wget "https://console."$activeDomain".com/sendemail?subject=Enterprise Administrative Alert&msg=An attempt was made by developer "$appReq" to add a new listener app named "$appName". It was denied becuase the app already exists. See Splunk for details."
+      rm ./sendemail* > /dev/null 2>&1
+      exit
+fi
+
+rowToAdd="listener^dev^"$appName"^"$appOcc
+echo $rowToAdd >> $dataFile
+
+read clientEmail < /enterprise_system/admin/data/guardian_email
+wget "https://console."$activeDomain".com/sendemail?to=$clientEmail&subject=Enterprise Administrative Alert&msg=Developer "$appReq" added a new listener app named "$appName". Recycle DEV app services to activate modifications. See Splunk for details."
+rm ./sendemail* > /dev/null 2>&1
+
+exit
+
+

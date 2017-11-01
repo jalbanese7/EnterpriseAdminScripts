@@ -1,0 +1,10 @@
+#!/bin/bash
+
+dataDir="/enterprise_system/administration/data"
+
+read activeContainerVer < $dataDir/active_anaconda_ver
+
+activeContainer="ent_"$activeContainerVer"_anaconda"
+docker run -v /mnt/nfs/awsefs/AnacondaEnvironments:/shared_anaconda_env -it $activeContainer /bin/bash
+
+exit

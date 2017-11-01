@@ -1,0 +1,17 @@
+#!/bin/bash
+
+service ntp restart
+sleep 10
+clear
+echo "============================================"
+echo "   Your UTC Timezone Clock is in sync       "
+echo "--------------------------------------------"
+date
+echo
+echo "--------  UTC Time Sync Servers   ----------"
+echo
+ntpq -p
+echo
+
+exit
+

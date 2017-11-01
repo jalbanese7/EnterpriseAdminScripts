@@ -1,0 +1,309 @@
+#/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 11/01/2016
+###########################################################################################
+
+dataDir="/enterprise_system/administration/data"
+userSpecifiedEnv="dev"
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+splunkLogDir="/root/enterprise_admin_splunk"
+ciLogFile=$splunkLogDir"/ent_ci_audit.log"
+
+read activeDomain < $dataDir/active_domain
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+# Verify veracript volume is mounted and creds are readable
+cnt=`ls /mnt/nfs/awsefs/veracrypt_nonprod_volume/$userSpecifiedEnv/creds.json|wc -c`
+if [ $cnt -eq 0 ]
+  then
+     echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=CI ent_action=Verify veracript volume is mounted and creds are readable ent_message_type=error ent_message=VeraCrtypt NonProd Volume Not Mounted " >> $ciLogFile
+     clear
+     echo;echo
+     tput smso
+     echo "Error - Action Required"
+     tput rmso
+     echo;echo
+     echo "The security team needs to mount the encrypted NonProd VeraCrypt volume using their secret password."
+     echo;echo
+     exit
+fi
+
+# Verify that Enterprise master indicator file is present
+if [ ! -f /root/enterprise_master_server ]
+  then
+    echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=CI ent_action=Verify that Enterprise master indicator file is present ent_message_type=error ent_message=Master Server Indicator File Not Found " >> $ciLogFile
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_master_server - See server Administrator"
+    echo
+    exit
+fi
+read masterServer < /root/enterprise_master_server
+
+dataDir="/enterprise_system/administration/data"
+
+# Promotion in progress 
+if [ `cat $dataDir/promo_status` != "UNLOCKED" ]
+  then
+      exit
+fi
+
+# Primary dev server is already processing (cron consideration)
+if [ `cat $dataDir/dev_ci_indicator` == "LOCKED" ]
+  then
+       exit
+fi
+# Avoid failover processing conflict
+if [ `cat $dataDir/dev_ci_indicator` == "UNLOCKED" ]
+  then
+      if [ $masterServer == "false" ]
+         then
+             exit
+      fi
+fi
+# Avoid failover processing conflict
+if [ `cat $dataDir/dev_ci_indicator` == "READYFORFAILOVER" ]
+  then
+      if [ $masterServer == "true" ]
+         then
+             exit
+      fi
+fi
+
+# Primary dev server will refresh repos from BitBucket on a reoccurring cycle controlled by cron
+if [ `cat $dataDir/dev_ci_indicator` != "READYFORFAILOVER" ]
+     then
+         # Refreshes repos
+         curDir=`pwd`
+         cd /mnt/nfs/awsefs/PythonServicesDEV
+         git pull origin dev > /tmp/PythonServicesDEV 2>&1
+         if [ `cat /tmp/PythonServicesDEV|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/dev
+         fi
+         cd /mnt/nfs/awsefs/PythonServicesUAT
+         git pull origin uat > /tmp/PythonServicesUAT 2>&1
+         if [ `cat /tmp/PythonServicesUAT|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/uat
+         fi
+         cd /mnt/nfs/awsefs/PythonServicesPROD
+         git pull origin master > /tmp/PythonServicesPROD 2>&1
+         if [ `cat /tmp/PythonServicesPROD|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/master
+         fi
+         cd /mnt/nfs/awsefs/PythonConfigDEV
+         git pull origin master > /tmp/PythonConfigDEV 2>&1
+         if [ `cat /tmp/PythonConfigDEV|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/master
+         fi
+         cd /mnt/nfs/awsefs/PythonConfigUAT
+         git pull origin master > /tmp/PythonConfigUAT 2>&1
+         if [ `cat /tmp/PythonConfigUAT|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/master
+         fi
+         cd /mnt/nfs/awsefs/PythonConfigPROD
+         git pull origin master > /tmp/PythonConfigPROD 2>&1
+         if [ `cat /tmp/PythonConfigPROD|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/master
+         fi
+         cd /mnt/nfs/awsefs/AnacondaEnvironments
+         git pull origin master > /tmp/AnacondaEnvironments 2>&1
+         if [ `cat /tmp/AnacondaEnvironments|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/master
+         fi
+         cd /mnt/nfs/awsefs/AppResources
+         git pull origin master > /tmp/AppResources 2>&1
+         if [ `cat /tmp/AppResources|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/master
+         fi
+         cd /mnt/nfs/awsefs/StaticWebsites
+         git pull origin dev  > /tmp/StaticWebsites 2>&1
+         if [ `cat /tmp/StaticWebsites|grep -c "CONFLICT"` -gt 0 ]
+            then
+                git reset --hard origin/dev
+         fi 
+         cd $curDir
+fi
+
+driverFile="/enterprise_system/administration/data/ent_app_driver.conf"
+appScriptBaseDir="/enterprise_system/administration/app_scripts/base_script"
+appScriptDir="/enterprise_system/administration/app_scripts"
+appModelBaseDir="/enterprise_system/administration/app_models/base_model"
+appModelDir="/enterprise_system/administration/app_models"
+pythonTemplateDir="/enterprise_system/administration/python_templates"
+pythonWrapperDestDir="/enterprise_system/$userSpecifiedEnv/services/guardian/script_wrappers"
+pythonCodebaseDir="/enterprise_system/$userSpecifiedEnv/services/guardian/python_codebase"
+nginxDir="/enterprise_system/administration/nginx_gateway_config/$userSpecifiedEnv"
+nginxLogs="/enterprise_system/administration/nginx_gateway_logs/$userSpecifiedEnv"
+nginxModelTemplates="/enterprise_system/administration/nginx_gateway_config/templates"
+botoScriptDir="/enterprise_system/administration/aws_boto"
+botoDataDir="/enterprise_system/administration/aws_admin_data"
+guardianBotoLbDir="/enterprise_system/administration/data/guardian_lb"
+auditDir="/enterprise_system/administration/data/guardian_ci"
+
+read clientEmail < /enterprise_system/admin/data/guardian_email
+read loadBalancerZoneId < $guardianBotoLbDir/$userSpecifiedEnv"_hostedzoneid"
+read loadBalancerDns < $guardianBotoLbDir/$userSpecifiedEnv"_dns"
+read activeDomain < $dataDir/active_domain
+
+# Spawn App Listeners
+rm /tmp/ci_nginx* > /dev/null 2>&1
+
+# Determine running listener names
+rm /tmp/ci_dockerActiveInstances* > /dev/null 2>&1
+docker ps > /tmp/ci_dockerActiveInstances1
+awk -v env="$userSpecifiedEnv" 'BEGIN {FS=" " }
+{
+   if ($0 !~ "_listener_") {
+      next;
+   }
+   split($0, rowBuf, " ");
+   split(rowBuf[2], rowEnv, "_")
+   if (rowEnv[6] !~ env) {
+      next;
+   }
+   print rowBuf[2]
+}
+' /tmp/ci_dockerActiveInstances1 > /tmp/ci_dockerActiveInstances2
+
+# No running containers - nothing to recycle
+if [ `cat /tmp/ci_dockerActiveInstances2|wc -l` -eq 0 ]
+   then
+        exit
+fi
+
+auditFile="audit_details.txt"
+rm $auditDir/$auditFile > /dev/null 2>&1
+cnt=0
+for R in `cat /tmp/ci_dockerActiveInstances2`
+do
+    # Determine active app details 
+    activeLCaseAppName=`echo $R|cut -d'_' -f3`
+    rowAppIdName=`cat /tmp/dev_active_appnames_xref|grep $activeLCaseAppName|cut -d'^' -f2`
+    rowPort=`echo $R|cut -d'_' -f5`
+    rowAppId="ent_app_"$rowAppIdName
+    appName=$R
+    programName=$rowAppIdName".py"
+
+    # Evaluate BitBucket repo status
+    cd $pythonCodebaseDir
+    lowerCaseAppIdName=`echo $rowAppIdName|tr [A-Z] [a-z]`
+    currentSnapshot=$lowerCaseAppIdName"_current"
+    baseSnapshot=$lowerCaseAppIdName"_base"
+    if [ ! -f $auditDir/$baseSnapshot ]
+        then
+            git log -1 -- $programName > $auditDir/$baseSnapshot
+    fi
+    git log -1 -- $programName > $auditDir/$currentSnapshot
+    cd $curDir
+    if [ `cmp $auditDir/$baseSnapshot $auditDir/$currentSnapshot | wc -l` -eq 0 ]
+        then
+           # No change - Do not process
+           continue
+    fi 
+
+    # Gather last git commit ids for each repo
+    cd /mnt/nfs/awsefs/PythonServicesDEV
+    gitServicesId=`git log -1 --pretty='format:%H' ./$rowAppIdName.py`
+    curDir=`pwd`
+    cd /mnt/nfs/awsefs/PythonConfigDEV
+    gitConfigId=`git log -1 --pretty='format:%H' ./$rowAppIdName.ini`
+    cd /mnt/nfs/awsefs/AnacondaEnvironments
+    gitCondaEnvId=`git log -1 --pretty='format:%H' ./$rowAppIdName.yml`
+    cd $curDir
+
+    # Use GUID if it has not been cleared by failover CI process finalization
+    if [ ! -f $dataDir/dev_ci_guid ]
+      then
+         guidVal=`python -c 'import uuid; print(str(uuid.uuid1()))'`
+         echo $guidVal > $dataDir/dev_ci_guid
+    else
+         read guidVal < $dataDir/dev_ci_guid
+    fi
+
+    sleep 1
+    # Perform container restart
+    if [ $masterServer == "true" ]
+      then
+           # Set indicator to lock down CI to DEV Primary server only
+           echo "LOCKED" > $dataDir/dev_ci_indicator 
+    fi
+    sleep 1
+
+    if [ `cat $dataDir/dev_ci_indicator` == "READYFORFAILOVER" ]
+      then
+           cp $auditDir/$currentSnapshot $auditDir/$baseSnapshot
+           cat $auditDir/$currentSnapshot >> $auditDir/$auditFile
+    fi
+
+    cnt=`expr $cnt + 1`
+    echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=CI ent_action=Source Code Modification Check ent_message_type=info ent_message=Modification Sensed ent_ci_appname=$rowAppIdName ent_ci_guid=$guidVal ent_ci_git_services_id=$gitServicesId ent_ci_git_config_id=$gitConfigId ent_ci_git_condaenv_id=$gitCondaEnvId " >> $ciLogFile
+
+    # Stop and remove listener attempt
+    docker stop $R
+    docker rm -v $R
+    # Python Script Wrapper
+    containerName="--containername="$appName"_"$serverId
+    serverName="--servername="$serverId
+    anacondaEnv=$rowAppIdName
+    rm $pythonTemplateDir/$rowAppId > /dev/null 2>&1
+    cp $pythonTemplateDir/base_listener_wrapper $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: ANACONDA_ENV/$anacondaEnv/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: PROGRAM_NAME/$rowAppIdName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: PORT/--port=$rowPort/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: SERVERNAME/$serverName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: CONTAINERNAME/$containerName/g" $pythonTemplateDir/$rowAppId
+    sed -i "s/### INSERT: MODE/--mode=$envUpperCase/g" $pythonTemplateDir/$rowAppId
+    cp $pythonTemplateDir/$rowAppId $pythonWrapperDestDir/$rowAppId
+
+    # App Script
+    cp $appScriptBaseDir/ent_app_listener $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: ENV/ENV=\"$userSpecifiedEnv\"/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_NAME/$appName/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_INTERNAL_PORT:APP_EXTERNAL_PORT/$rowPort:$rowPort/g" $appScriptDir/$rowAppId
+    sed -i "s/### INSERT: APP_MODEL_NAME/$appName/g" $appScriptDir/$rowAppId
+    $appScriptDir/$rowAppId
+
+done
+
+if [ $cnt -gt 0 ]
+  then
+    if [ $masterServer == "true" ]
+      then
+           # DEV Failover can now recycle listeners as needed 
+           echo "READYFORFAILOVER" > $dataDir/dev_ci_indicator
+           echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=CI ent_action=Reinitialize Environment ent_message_type=info ent_message=Primary DEV server reinitialized - Passing control to DEV failover ent_ci_guid=$guidVal " >> $ciLogFile
+    else
+           # DEV primary and failover processing is complete
+           echo "UNLOCKED" > $dataDir/dev_ci_indicator
+           rm $dataDir/dev_ci_guid
+           echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=CI ent_action=Reinitialize Environment ent_message_type=info ent_message=Failover DEV server reinitialized ent_guid=$guidVal " >> $ciLogFile
+
+           wget "https://console."$activeDomain".com/sendemail?to=$clientEmail&subject=Enterprise Administrative Alert&msg=Python code modifications have been sensed in the Development Environment and the CI process has been completed. The GUID for this Continuous Integration runtime session is $guidVal. See Splunk for details."
+           rm ./sendemail* > /dev/null 2>&1
+    fi
+fi
+
+exit
+
+

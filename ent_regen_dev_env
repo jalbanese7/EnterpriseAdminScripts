@@ -1,0 +1,100 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#                Generate local developer environment docker container
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016
+###########################################################################################
+
+dataDir="/enterprise_system/administration/data"
+appModelBaseDir="/enterprise_system/administration/app_models/base_model"
+appModelDir="/enterprise_system/administration/app_models"
+dropboxDropDir="/root/Dropbox/LocalDevEnvironment/Enterprise_Dev_Docker_Container"
+privateClientArea="/mnt/nfs/awsefs/veracrypt_nonprod_volume/dev"
+splunkLogDir="/root/enterprise_admin_splunk"
+ldeLogFile=$splunkLogDir"/ent_lde_audit.log"
+
+read activeDomain < $dataDir/active_domain
+read clientEmail < /enterprise_system/admin/data/guardian_email
+read serverId < /root/enterprise_server_id
+
+if [ `docker images|grep -c ent_localdev_env` -gt 0 ]
+   then
+      docker rmi -f $imageName
+fi
+
+# Verify veracript volume is mounted and creds are readable
+cnt=`ls $privateClientArea/creds.json|wc -c`
+if [ $cnt -eq 0 ]
+  then
+     clear
+     echo;echo
+     tput smso
+     echo "Error - Action Required"
+     tput rmso
+     echo;echo
+     echo "The security team needs to mount the encrypted VeraCrypt volume using their secret password."
+     echo;echo
+     exit
+fi
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo;
+tput smso;
+echo -n " This process could take more then 20 minutes: "
+tput rmso
+tput blink;
+echo " Press any key to continue"
+tput sgr0;
+echo "=========================================================================="
+echo
+read pause
+echo "Starting process..."
+
+read activeContainerVer < $dataDir/active_container_ver
+fullCondaVer="ent_"$activeContainerVer"_anaconda"
+
+rm $dropboxDropDir/ent_localdev_env.tar > /dev/null 2>&1
+sleep 3
+rm $dropboxDropDir/ent_localdev_env_version.txt > /dev/null 2>&1
+sleep 3
+rm -rf $appModelDir/ent_localdev_env > /dev/null 2>&1
+cp -r $appModelBaseDir/ent_localdev_env $appModelDir/ent_localdev_env
+cd $appModelDir/ent_localdev_env
+sed -i "s/### INSERT: ENTANACONDA/$fullCondaVer/g" $appModelDir/ent_localdev_env/Dockerfile
+cp $privateClientArea/creds.json .
+docker build -t ent_localdev_env .
+docker save -o $dropboxDropDir/ent_localdev_env.tar ent_localdev_env
+echo "Version Publication Date: "`date` > $dropboxDropDir/ent_localdev_env_version.txt
+rm ./creds.json > /dev/null 2>&1 
+
+# Generate developer notification alert
+echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=LDE ent_action=Generate New LDE Container ent_message_type=info ent_message=A new LDE Container has been generated and sent to Dropbox" >> $ldeLogFile
+
+wget "https://console."$activeDomain".com/sendemail?to=$clientEmail&subject=Enterprise Administrative Alert&msg=A new LDE developer container has been generated. Please run osx_update_localdev_env or win_update_localdev_env.bat depending on the OS that you are running on your local workstation. These update scripts are located in Dropbox. See Splunk for details."
+rm ./sendemail* > /dev/null 2>&1
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo;
+tput smso;
+echo " Docker create development environment container process is complete.     "
+echo " Files ent_localdev_env.tar and ent_localdev_env_version.txt will appear  "
+echo " in Dropbox within 15 minutes.                                            "
+echo
+echo " The output folder within Dropbox to monitor is:                          "
+echo "     LocalDevEnvironment/Enterprise_Dev_Docker_Container     "
+tput sgr0;
+echo "=========================================================================="
+echo
+
+
+exit
+
+

@@ -1,0 +1,76 @@
+#/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 8/18/2016
+###########################################################################################
+
+set -x
+
+userSpecifiedEnv="dev"
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+
+# Test repos
+curDir=`pwd`
+cd /mnt/nfs/awsefs/PythonServicesDEV
+git pull origin dev > /tmp/PythonServicesDEV 2>&1
+if [ `cat /tmp/PythonServicesDEV|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/dev
+fi
+cd /mnt/nfs/awsefs/PythonServicesUAT
+git pull origin uat > /tmp/PythonServicesUAT 2>&1
+if [ `cat /tmp/PythonServicesUAT|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/uat
+fi
+cd /mnt/nfs/awsefs/PythonServicesPROD
+git pull origin master > /tmp/PythonServicesPROD 2>&1
+if [ `cat /tmp/PythonServicesPROD|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/master
+fi
+cd /mnt/nfs/awsefs/PythonConfigDEV
+git pull origin master > /tmp/PythonConfigDEV 2>&1
+if [ `cat /tmp/PythonConfigDEV|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/master
+fi
+cd /mnt/nfs/awsefs/PythonConfigUAT
+git pull origin master > /tmp/PythonConfigUAT 2>&1
+if [ `cat /tmp/PythonConfigUAT|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/master
+fi 
+cd /mnt/nfs/awsefs/PythonConfigPROD
+git pull origin master > /tmp/PythonConfigPROD 2>&1
+if [ `cat /tmp/PythonConfigPROD|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/master
+fi
+cd /mnt/nfs/awsefs/AnacondaEnvironments
+git pull origin master > /tmp/AnacondaEnvironments 2>&1
+if [ `cat /tmp/AnacondaEnvironments|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/master
+fi
+cd /mnt/nfs/awsefs/AppResources
+git pull origin master > /tmp/AppResources 2>&1
+if [ `cat /tmp/AppResources|grep -c "CONFLICT"` -gt 0 ]
+     then
+         git reset --hard origin/master
+fi 
+cd /mnt/nfs/awsefs/StaticWebsites
+git pull origin master  > /tmp/StaticWebsites 2>&1
+if [ `cat /tmp/StaticWebsites|grep -c "CONFLICT"` -gt 0 ]
+     then
+        git reset --hard origin/master
+fi
+cd $curDir
+
+exit
+
+

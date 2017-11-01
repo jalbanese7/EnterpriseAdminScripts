@@ -1,0 +1,3 @@
+ 
+if __name__ == '__main__':
+    luigi.run(["--local-scheduler"], main_task_cls=### INSERT: TASKNAME)

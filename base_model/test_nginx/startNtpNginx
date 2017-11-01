@@ -1,0 +1,6 @@
+#!/bin/bash
+
+service ntp start
+/usr/sbin/nginx -g "daemon off;"
+
+

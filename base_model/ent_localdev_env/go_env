@@ -1,0 +1,22 @@
+#!/bin/bash
+
+clear
+tput smso;echo " Active Conda Environments ";tput rmso
+echo "------------------------------------------------------------"
+echo
+ls /shared_anaconda_env
+echo
+tput smso;echo " Active Python Codebase ";tput rmso
+echo "------------------------------------------------------------"
+echo
+ls /shared_volume/python_codebase
+echo
+tput smso;echo " Active Python App Config Files ";tput rmso
+echo "------------------------------------------------------------"
+echo
+ls /shared_areas/config
+echo
+
+exit
+
+

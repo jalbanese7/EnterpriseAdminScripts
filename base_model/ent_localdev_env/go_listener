@@ -1,0 +1,30 @@
+#!/bin/bash
+
+if [ "$#" -ne 1 ]; then
+    echo
+    echo "Usage: go_listener <<Anaconda Env>>"
+    echo
+    exit
+fi
+
+clear
+kill -9 `pidof python` > /dev/null 2>&1
+runtimeIP=`ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{print $1}'`
+echo "==================================================================================================="
+tput smso
+echo "                                Enterprise Local Developer Listener                                "
+tput rmso
+echo "---------------------------------------------------------------------------------------------------"
+echo "          Test using command http://localhost:9999 followed by app specific parameters     " 
+echo 
+echo -n "                          Press the ";tput blink;echo -n "<<ENTER>>";tput sgr0;echo " key to begin your session"
+echo "==================================================================================================="
+echo;echo
+
+targetProgram=$1".py"
+source /root/anaconda3/bin/activate $1
+python /shared_volume/python_codebase/$targetProgram --ip=0.0.0.0 --port=9999 --servername=developer_workstation --containername=development_listener_9999_local &
+#source /root/anaconda3/bin/deactivate
+
+exit
+

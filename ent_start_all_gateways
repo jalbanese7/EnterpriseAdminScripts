@@ -1,0 +1,35 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 10/08/2016 
+###########################################################################################
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo;
+tput smso;
+tput blink;
+echo "                       Starting All Gateways                              "
+tput sgr0;
+echo "=========================================================================="
+echo;echo;echo
+
+adminScriptsDir="/enterprise_system/administration/admin_scripts"
+
+$adminScriptsDir/ent_start_gateway dev
+#$adminScriptsDir/ent_start_gateway test
+$adminScriptsDir/ent_start_gateway uat
+$adminScriptsDir/ent_start_gateway prod
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+echo "=========================================================================="
+echo;echo;echo
+
+exit

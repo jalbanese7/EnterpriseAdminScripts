@@ -1,0 +1,19 @@
+#!/bin/bash
+
+### INSERT: ENV
+
+enterprise_system=`cat /enterprise_system/administration/data/ent_env|cut -d'^' -f1`
+
+map1LocationAndAlias="$enterprise_system/$ENV/services/guardian/script_wrappers:/shared_volume/scripts"
+map2LocationAndAlias="$enterprise_system/$ENV/services/guardian/python_codebase:/shared_volume/python_codebase"
+map3LocationAndAlias="$enterprise_system/$ENV/shared_areas:/shared_areas"
+map4LocationAndAlias="$enterprise_system/$ENV/shared_areas/config:/shared_areas/config"
+map5LocationAndAlias="$enterprise_system/$ENV/shared_areas/app_resources:/shared_areas/app_resources"
+map6LocationAndAlias="/mnt/nfs/softnas/DataArchive:/shared_data_archive"
+map7LocationAndAlias="/root/enterprise_admin_splunk:/shared_splunk"
+
+docker run --name ### INSERT: APP_NAME -v $map1LocationAndAlias -v $map2LocationAndAlias -v $map3LocationAndAlias -v $map4LocationAndAlias  -v $map5LocationAndAlias  -v $map6LocationAndAlias -v $map7LocationAndAlias -p ### INSERT: APP_INTERNAL_PORT:APP_EXTERNAL_PORT -d ### INSERT: APP_MODEL_NAME 
+
+exit
+
+

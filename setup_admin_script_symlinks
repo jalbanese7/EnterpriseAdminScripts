@@ -1,0 +1,43 @@
+#!/bin/bash
+
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 6/2/2016
+###########################################################################################
+
+rm /enterprise_system/admin
+rm /enterprise_system/dev
+rm /enterprise_system/test
+rm /enterprise_system/uat
+rm /enterprise_system/prod
+rm /enterprise_system
+
+ln -s /mnt/nfs/awsefs/enterprise_system /enterprise_system
+ln -s /enterprise_system/administration /enterprise_system/admin 
+ln -s /enterprise_system/core_system_prod /enterprise_system/prod 
+ln -s /enterprise_system/core_system_test /enterprise_system/test 
+ln -s /enterprise_system/core_system_uat /enterprise_system/uat 
+ln -s /enterprise_system/core_system_dev /enterprise_system/dev
+
+exit
+
+
+workDir="/enterprise_system/admin/admin_scripts"
+
+for R in `ls $wrkDir`
+do
+   if [ `echo $R|grep -c "setup_admin_script_symlinks"` -gt 0 ]
+    then
+      continue
+   fi
+   rm /$R > /dev/null 2>&1
+   ln -s $workDir/$R /root/$R
+
+done
+echo;echo;echo
+
+exit

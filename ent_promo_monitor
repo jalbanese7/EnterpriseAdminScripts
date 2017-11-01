@@ -1,0 +1,202 @@
+#/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 11/9/2016
+###########################################################################################
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+
+read serverPromoInd < /root/enterprise_promo_indicator
+toEnv=`echo $serverPromoInd|cut -d'_' -f1`
+literalVal=`echo $serverPromoInd|cut -d'_' -f2`
+fromEnv=`echo $serverPromoInd|cut -d'_' -f3`
+toType=`echo $serverPromoInd|cut -d'_' -f4`
+read consolePromoInd < /enterprise_system/admin/data/console_promo_indicator
+
+dataDir="/enterprise_system/administration/data"
+dataFile="$dataDir/ent_app_driver.conf"
+dataStageDir="/enterprise_system/administration/data/guardian_tmp"
+dataStageFile="$dataStageDir/prod_instances"
+websiteSourceDir="/enterprise_system/$fromEnv/websites"
+websiteDestDir="/enterprise_system/$toEnv/websites"
+appResourcesSourceDir="/enterprise_system/$fromEnv/shared_areas/app_resources"
+appResourcesDestDir="/enterprise_system/$toEnv/shared_areas/app_resources"
+adminScriptsDir="/enterprise_system/administration/admin_scripts"
+splunkLogDir="/root/enterprise_admin_splunk"
+promoLogFile=$splunkLogDir"/ent_promo_audit.log"
+
+read clientEmail < $dataDir/guardian_email
+read activeDomain < $dataDir/active_domain
+
+# Process if indicators match
+if [ $consolePromoInd != $serverPromoInd ]
+   then
+     exit
+fi
+
+if [ `cat $dataDir/dev_ci_indicator` != "UNLOCKED" ]
+  then
+    exit
+fi
+
+if [ `cat $dataDir/promo_status` == "UNLOCKED" ]
+  then
+    if [ $toType == "master" ]
+       then
+          echo "LOCKED" > $dataDir/promo_status
+          echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=PROMO ent_action=Promote Python Components ent_message_type=info ent_message=Promotion Process Started  - Primary Server" >> $promoLogFile
+
+          cp -r $appResourcesSourceDir/* $appResourcesDestDir
+          #cp -r $websiteSourceDir/* $websiteDestDir
+
+          rm /tmp/tmp_ent_app_driver* > /dev/null 2>&1
+          if [ $toEnv == "prod" ]
+             then
+                # Maintain all dev entries in their current state 
+                for R in `cat $dataFile`
+                do
+                    rowEnv=`echo $R|cut -d'^' -f2`
+                    rowAppName=`echo $R|cut -d'^' -f3`
+                    if [ $rowEnv == "dev" ]
+                      then
+                          echo $R >> /tmp/tmp_ent_app_driver1.conf
+                    fi
+                done
+
+                # Gather all uat config file entries
+                for R in `cat $dataFile`
+                do
+                   rowEnv=`echo $R|cut -d'^' -f2`
+                   rowAppName=`echo $R|cut -d'^' -f3`
+                   if [ $rowEnv == "uat" ]
+                      then
+                          echo $R >> /tmp/tmp_ent_app_driver2.conf
+                   fi
+                done
+
+                # Replicate uat entries and assign to prod. Account for instance number staged changes. 
+                for R in `cat $dataFile`
+                do
+                   rowType=`echo $R|cut -d'^' -f1`
+                   rowEnv=`echo $R|cut -d'^' -f2`
+                   rowAppName=`echo $R|cut -d'^' -f3`
+                   if [ $rowEnv == "uat" ]
+                      then
+                        if [ $rowType = 'listener' ]
+                           then
+                              if [ `cat $dataStageFile|grep -c $rowAppName` -gt 0 ]
+                                 then
+                                     prodStageInstances=`cat $dataStageFile|grep $rowAppName|cut -d'^' -f2`
+                                     lineout="listener^prod^"$rowAppName"^"$prodStageInstances
+                                     echo $lineout >> /tmp/tmp_ent_app_driver3.conf
+                                     continue
+                              fi
+                        fi
+                        echo $R >> /tmp/tmp_ent_app_driver3.conf
+                        sed -i "s/\^uat\^/\^prod\^/g" /tmp/tmp_ent_app_driver3.conf
+                   fi
+                done
+
+                cat /tmp/tmp_ent_app_driver1.conf >> /tmp/tmp_ent_app_driver.conf
+                cat /tmp/tmp_ent_app_driver2.conf >> /tmp/tmp_ent_app_driver.conf
+                cat /tmp/tmp_ent_app_driver3.conf >> /tmp/tmp_ent_app_driver.conf
+                cp /tmp/tmp_ent_app_driver.conf $dataFile
+          fi
+
+          if [ $toEnv == "uat" ]
+             then
+                # Gather all dev config file entries
+                rm /tmp/tmp_ent_app_driver* > /dev/null 2>&1
+                for R in `cat $dataFile`
+                do
+                   rowEnv=`echo $R|cut -d'^' -f2`
+                   rowAppName=`echo $R|cut -d'^' -f3`
+                   if [ $rowEnv == "dev" ]
+                      then
+                         echo $R >> /tmp/tmp_ent_app_driver1.conf
+                   fi
+                done
+
+                # Replicate dev entries and assign to uat
+                for R in `cat $dataFile`
+                do
+                      rowEnv=`echo $R|cut -d'^' -f2`
+                      rowAppName=`echo $R|cut -d'^' -f3`
+                      if [ $rowEnv == "dev" ]
+                         then
+                          echo $R >> /tmp/tmp_ent_app_driver2.conf
+                          sed -i "s/\^dev\^/\^uat\^/g" /tmp/tmp_ent_app_driver2.conf
+                      fi
+                done
+
+                # Maintain all prod entries in their current state 
+                for R in `cat $dataFile`
+                do
+                      rowEnv=`echo $R|cut -d'^' -f2`
+                      rowAppName=`echo $R|cut -d'^' -f3`
+                      if [ $rowEnv == "prod" ]
+                         then
+                          echo $R >> /tmp/tmp_ent_app_driver3.conf
+                      fi
+                done
+
+                cat /tmp/tmp_ent_app_driver1.conf >> /tmp/tmp_ent_app_driver.conf
+                cat /tmp/tmp_ent_app_driver2.conf >> /tmp/tmp_ent_app_driver.conf
+                cat /tmp/tmp_ent_app_driver3.conf >> /tmp/tmp_ent_app_driver.conf
+                cp /tmp/tmp_ent_app_driver.conf $dataFile
+          fi
+
+          $adminScriptsDir/ent_clear_all_instances
+          $adminScriptsDir/ent_start_listeners $toEnv
+
+          if [ $toEnv == "prod" ]
+            then
+                $adminScriptsDir/ent_start_prod_console
+                echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=PROMO ent_action=Restart Admin Console ent_message_type=info ent_message=Enterprise Console Restarted - Primary Server " >> $promoLogFile
+          fi
+          $adminScriptsDir/ent_start_gateway $toEnv
+          newIndicator=$toEnv"_"$literalVal"_"$fromEnv"_""failover"
+          echo $newIndicator > $dataDir/console_promo_indicator 
+          echo "READYFORFAILOVER" > $dataDir/promo_status
+          echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId Server ent_operation=PROMO ent_action=Promote Python Components ent_message_type=info ent_message=Promotion details from ${fromEnv^^} to ${toEnv^^} have been completed on the Primary destination server - Passing control to Failover Destination Server " >> $promoLogFile
+          exit
+    fi
+fi
+
+if [ `cat $dataDir/promo_status` == "READYFORFAILOVER" ]
+  then
+    echo "PROCESSINGFAILOVER" > $dataDir/promo_status
+    echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=PROMO ent_action=Promote Python Components ent_message_type=info ent_message=Promotion Process Started  - Failover Server" >> $promoLogFile
+    $adminScriptsDir/ent_clear_all_instances
+    $adminScriptsDir/ent_start_listeners $toEnv
+    if [ $toEnv == "prod" ]
+       then
+         $adminScriptsDir/ent_start_prod_console
+         echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId ent_operation=PROMO ent_action=Restart Admin Console ent_message_type=info ent_message=Enterprise Console Restarted - Failover Server " >> $promoLogFile
+    fi
+    $adminScriptsDir/ent_start_gateway $toEnv
+    echo "UNLOCKED" > $dataDir/console_promo_indicator
+    echo "UNLOCKED" > $dataDir/promo_status
+    echo "timestamp=`date '+%Y%m%d%H:%M:%S'` sourcetype=enterprise_framework environment=$serverId Server ent_operation=PROMO ent_action=Promote Python Components ent_message_type=info ent_message=Promotion details from ${fromEnv^^} to ${toEnv^^} have been completed on the Failover destination server " >> $promoLogFile
+
+    upperCaseFromEnv=`echo $fromEnv|tr [a-z] [A-Z]`
+    upperCaseToEnv=`echo $toEnv|tr [a-z] [A-Z]`
+    wget "https://console."$activeDomain".com/sendemail?to=$clientEmail&subject=Enterprise Administrative Alert&msg=A Python code promotion from "$upperCaseFromEnv" to "$upperCaseToEnv" has been completed. See Splunk for details."
+    rm ./sendemail* > /dev/null 2>&1
+fi
+
+exit
+
+

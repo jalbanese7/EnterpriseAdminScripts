@@ -1,0 +1,10 @@
+#!/bin/bash
+
+service start ntp
+
+source /root/anaconda3/bin/activate enterprise_admin 
+python /root/ent_console.py --ip=0.0.0.0 --port=10100 --servername=prod_primary
+source /root/anaconda3/bin/deactivate
+
+exit
+

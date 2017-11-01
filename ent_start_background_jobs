@@ -1,0 +1,119 @@
+#/bin/bash
+
+########################################################################################################
+# Comments:
+#  Driving data structure example:
+#   batch^dev^backgroundjobs^bTestbgjob^arg1,arg2,arg3^B^
+#     "batch = Enterprise Instance Type
+#     "dev" = Runtime Environment - Options dev, uat, test, and prod
+#     "backgroundjobs" = Job task master grouping referred to as a scenario.
+#     "bTestbgjob" = App name. Note that associated Python program needs to be in file name
+#                    format ent_app_testbgjob and checked into BitBucket repository
+#                    PythonServices.
+#     "arg1,arg2,arg3" = Comma seperated list of Batch Python program input arguments. 
+#     "Task Level Identifier" = B stands for single task with no other task dependencies that runs
+#                               as a Linux background task, which could poll a directory for example.
+#     "No dependent tasks exist for type B"
+#
+#--------------------------------------------------------------------------------------------------------
+# Author: John Albanese
+# Last Revision: 8/5/2016
+#########################################################################################################
+
+if [ $# -eq 0 ]
+  then
+    echo
+    echo "Usage: ent_start_background_jobs <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit 
+fi
+
+userSpecifiedEnv=$1
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+if [ $userSpecifiedEnv == "dev" ]
+  then
+      msg="DEV - Refreshing Batch Background Environment..."
+elif [ $userSpecifiedEnv == "test" ]
+  then
+      msg="TEST - Refreshing Batch Background Environment..."
+elif [ $userSpecifiedEnv == "uat" ]
+  then
+      msg="UAT - Refreshing Batch Background Environment..."
+elif [ $userSpecifiedEnv == "prod" ]
+  then
+      msg="PROD - Refreshing Batch Background Environment..."
+else
+    echo
+    echo "Usage: ent_start_background_jobs <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+
+clear
+echo "==========================================================================" 
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase" 
+echo;
+tput smso;
+echo "            Refreshing Batch Background Environment Job Scenarios         "
+tput rmso
+echo "--------------------------------------------------------------------------" 
+echo "Base Job Execution Directory:"
+
+dataDir="/enterprise_system/administration/data"
+driverFile="/enterprise_system/administration/data/ent_app_driver.conf"
+appScriptBaseDir="/enterprise_system/administration/app_scripts/base_script"
+appScriptDir="/enterprise_system/administration/app_scripts"
+appScriptBatchDockerDir="/enterprise_system/$userSpecifiedEnv/services/guardian/batch_docker_scripts"
+appScriptRunBatchDir="/enterprise_system/$userSpecifiedEnv/services/guardian/batch_run_scripts"
+appModelBaseDir="/enterprise_system/administration/app_models/base_model"
+appModelDir="/enterprise_system/administration/app_models"
+pythonTemplateDir="/enterprise_system/administration/python_templates"
+pythonWrapperDestDir="/enterprise_system/$userSpecifiedEnv/services/guardian/script_wrappers"
+pythonBatchScenarioDir="/enterprise_system/$userSpecifiedEnv/services/guardian/batch_python_scenarios"
+luigiStatusFileDir="/enterprise_system/$userSpecifiedEnv/shared_areas/luigi_status_files"
+batchStagingDir="/tmp/"$userSpecifiedEnv"_batch_staging"
+
+echo $appScriptRunBatchDir 
+echo "==========================================================================" 
+echo;
+
+# Clear tmp files
+
+# Clear existing running batch background jobs running in the background for the targeted environment
+
+cnt=0
+for R in `cat $driverFile`
+do
+    # Filter by environment and type batch
+    rowType=`echo $R|cut -d'^' -f1`
+    rowEnv=`echo $R|cut -d'^' -f2`
+    if [ $rowEnv != $userSpecifiedEnv ] 
+      then
+        continue 
+    fi
+    if [ $rowType != "batch" ] 
+      then
+        continue 
+    fi
+    task_type=`echo $R|cut -d'^' -f6`
+    scenario_name=`echo $R|cut -d'^' -f3`
+    task_name=`echo $R|cut -d'^' -f4`
+    if [ $task_type == 'B' ]
+      then
+         fullScenarioName="ent_app_"$scenario_name
+         echo "                      "$fullScenarioName
+         scenarioRunTarget=$appScriptRunBatchDir"/"$fullScenarioName
+         # kill existing scenario process
+         # start scenario job in background 
+         nohup $scenarioRunTarget > /dev/null 2>&1 &
+         ### /etc/rc.local should be set to run this script to start jobs upon reboot
+    fi
+
+done
+echo;echo
+
+exit
+
+
+

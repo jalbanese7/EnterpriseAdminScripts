@@ -1,0 +1,32 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 9/21/2016
+###########################################################################################
+
+dataDir="/enterprise_system/administration/data"
+
+if [ $# -eq 0 ]
+  then
+    echo
+    echo "Usage: ent_recycle_dev_listeners <<Ending Status Indicator>>"
+    echo
+    exit
+fi
+
+endingStatusIndicator=$1
+
+/enterprise_system/admin/admin_scripts/ent_clear_all_instances
+/enterprise_system/admin/admin_scripts/ent_start_listeners dev
+/enterprise_system/admin/admin_scripts/ent_start_gateway dev 
+
+echo $endingStatusIndicator > $dataDir/dev_action_status
+
+exit
+
+
+

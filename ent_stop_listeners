@@ -1,0 +1,112 @@
+#!/bin/bash
+
+###########################################################################################
+# Comments:
+#
+#------------------------------------------------------------------------------------------
+# Author: John Albanese     
+# Last Revision: 9/22/2016
+###########################################################################################
+
+if [ $# -eq 0 ]
+  then
+    echo
+    echo "Usage: ent_stop_listeners <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+
+userSpecifiedEnv=$1
+envUpperCase=`echo $userSpecifiedEnv|tr [a-z] [A-Z]`
+if [ $userSpecifiedEnv == "dev" ]
+  then
+      msg="DEV Enterprise Listeners have been stopped..."
+elif [ $userSpecifiedEnv == "test" ]
+  then
+      msg="TEST Enterprise Listeners have been been stopped..."
+elif [ $userSpecifiedEnv == "uat" ]
+  then
+      msg="UAT Enterprise Listeners have been stopped..."
+elif [ $userSpecifiedEnv == "prod" ]
+  then
+      msg="PROD Enterprise Listeners have been stopped..."
+else
+    echo
+    echo "Usage: ent_stop_listeners <<prod>> <<uat>> <<test>> <<dev>>"
+    echo
+    exit
+fi
+
+# Verify specific server id is present
+if [ ! -f /root/enterprise_server_id ]
+  then
+    echo
+    echo "Error: Local server does not contain a readable version of mandatory file /root/enterprise_server_id - See server Administrator"
+    echo
+    exit
+fi
+read serverId < /root/enterprise_server_id
+rm /enterprise_system/admin/monitor_urls/$serverId/* > /dev/null 2>&1
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo;
+tput smso;
+tput blink;
+echo "                 Stopping 'App Listeners' - Please wait...                "
+tput sgr0;
+echo "=========================================================================="
+echo;echo;echo
+
+# Clear existing running app listeners and inactive dormant app listeners within the user specified region 
+rm /tmp/dockerInstances* > /dev/null 2>&1
+docker images > /tmp/dockerOldInstances1
+awk -v env="$1" 'BEGIN {FS=" " }
+{
+  if ($0 ~ "REPOSITORY") {
+      next;
+   }
+   if ($0 ~ "_gateway_") {
+      next;
+   }
+   if ($0 ~ "_batch_") {
+      next;
+   }
+   if ($0 !~ "ent_app_") {
+      next;
+   }
+   split($0, rowEnvBuf, " ");
+   split(rowEnvBuf[1], rowEnv, "_")
+   if (rowEnv[6] !~ env) {
+      next;
+   }
+   print $1;
+}
+' /tmp/dockerOldInstances1 > /tmp/dockerOldInstances2
+
+for ID in `cat /tmp/dockerOldInstances2`
+do
+   docker stop $ID
+   docker rm -v $ID
+   docker rmi -f $ID
+done
+
+clear
+echo "=========================================================================="
+figlet "   G U A R D I A N"
+figlet -f slant "          $envUpperCase"
+echo;
+echo "=========================================================================="
+echo;echo;echo
+
+
+echo
+echo $msg
+echo
+echo;echo;echo
+
+exit
+
+

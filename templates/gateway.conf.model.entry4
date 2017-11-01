@@ -1,0 +1,10 @@
+
+server {
+    listen ### INSERT: PORT 
+    proxy_pass tcp_### INSERT: PROXY; 
+}
+
+upstream tcp_### INSERT: PROXY {
+    server localhost:### INSERT: PORT 
+}
+
